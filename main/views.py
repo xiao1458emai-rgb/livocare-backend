@@ -455,7 +455,34 @@ def manage_profile(request):
                 'activity_level': getattr(user, 'activity_level', None),
             }
         })
+from django.contrib.auth.hashers import check_password
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """تغيير كلمة المرور"""
+    user = request.user
+    is_arabic = get_request_language(request) == 'ar'
+    
+    current_password = request.data.get('current_password')
+    new_password = request.data.get('new_password')
+    
+    if not current_password or not new_password:
+        return Response({'success': False, 'error': 'الرجاء إدخال كلمة المرور الحالية والجديدة'}, status=400)
+    
+    if len(new_password) < 8:
+        return Response({'success': False, 'error': 'كلمة المرور الجديدة قصيرة جداً (8 أحرف على الأقل)'}, status=400)
+    
+    if not user.check_password(current_password):
+        return Response({'success': False, 'error': 'كلمة المرور الحالية غير صحيحة'}, status=400)
+    
+    user.set_password(new_password)
+    user.save()
+    
+    return Response({'success': True, 'message': 'تم تغيير كلمة المرور بنجاح'})
 # ==============================================================================
 # 🌤️ 6. APIs الخارجية
 # ==============================================================================
