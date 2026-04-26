@@ -455,6 +455,10 @@ def manage_profile(request):
                 'activity_level': getattr(user, 'activity_level', None),
             }
         })
+# =============================================================================
+# إدارة الحساب - دوال إضافية
+# =============================================================================
+
 from django.contrib.auth.hashers import check_password
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -483,6 +487,29 @@ def change_password(request):
     user.save()
     
     return Response({'success': True, 'message': 'تم تغيير كلمة المرور بنجاح'})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_my_account(request):
+    """حذف حساب المستخدم بالكامل"""
+    user = request.user
+    username = user.username
+    user.delete()
+    return Response({'success': True, 'message': f'تم حذف حساب المستخدم {username} بنجاح'})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_all_data(request):
+    """تصدير جميع بيانات المستخدم"""
+    user = request.user
+    data = {
+        'profile': {'username': user.username, 'email': user.email},
+        'user_id': user.id,
+        'export_date': timezone.now().isoformat(),
+    }
+    return Response({'success': True, 'data': data})
 # ==============================================================================
 # 🌤️ 6. APIs الخارجية
 # ==============================================================================
