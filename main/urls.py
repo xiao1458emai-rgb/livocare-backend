@@ -1,11 +1,11 @@
-# main/urls.py - النسخة المعدلة بالكامل
+# main/urls.py - النسخة النهائية (بدون دوال الساعة الذكية)
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView 
 from django.http import JsonResponse  
 from main.views import (
-    # ✅ جميع الدوال المستوردة
+    # ✅ جميع الدوال المستوردة (بدون دوال الساعة الذكية)
     scan_barcode, advanced_cross_insights, cross_insights, google_auth,
     trigger_notifications, generate_notifications_now,
     push_subscribe,
@@ -24,11 +24,10 @@ from main.views import (
     cron_test_simple,
     get_weather, search_food, suggest_exercises, analyze_sentiment,
     get_smart_recommendations,
-    watch_health_data, watch_history, adb_watch_data,
     search_medication, get_medication_details, get_user_medications,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
-    # ✅ أضف دوال ESP32
+    # ✅ دوال ESP32 فقط
     esp32_update_health_status,
     esp32_get_latest_health_status,
     esp32_get_health_history,
@@ -56,7 +55,7 @@ router.register(r'notifications', views.NotificationViewSet, basename='notificat
 router.register(r'environment-data', views.EnvironmentDataViewSet, basename='environment-data')
 
 # =========================================================
-# ✅ مسارات ESP32 (قسم منفصل)
+# ✅ مسارات ESP32 فقط (بدون دوال الساعة الذكية)
 # =========================================================
 esp32_urls = [
     path('esp32/update/', esp32_update_health_status, name='esp32-update'),
@@ -65,7 +64,7 @@ esp32_urls = [
 ]
 
 # =========================================================
-# ✅ المسارات الأساسية المعدلة
+# ✅ المسارات الأساسية (بدون مسارات الساعة الذكية)
 # =========================================================
 base_urls = [
     # 🧠 التحليلات الذكية
@@ -96,11 +95,6 @@ base_urls = [
     
     # 📷 ماسح الباركود
     path('scan-barcode/', scan_barcode, name='scan-barcode'),
-    
-    # ⌚ بيانات الساعة الذكية
-    path('watch/health-data/', watch_health_data, name='watch_health_data'),
-    path('watch/history/', watch_history, name='watch_history'),
-    path('watch/adb-data/', adb_watch_data, name='adb_watch_data'),
     
     # 🩺 الأدوية
     path('medications/search/', search_medication, name='search-medication'),
@@ -179,7 +173,7 @@ notification_custom_urls = [
 urlpatterns = [
     path('', include(router.urls)),
     *notification_custom_urls,
-    *esp32_urls,  # ✅ أضف مسارات ESP32 هنا
+    *esp32_urls,  # ✅ مسارات ESP32 فقط
     *base_urls,
 ]
 
