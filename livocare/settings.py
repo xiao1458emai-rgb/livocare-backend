@@ -199,7 +199,8 @@ CSRF_TRUSTED_ORIGINS = [
     "http://192.168.8.187:8000",
     "https://*.onrender.com",
     "https://*.railway.app",
-    "https://livocare-production.up.railway.app",  # ✅ أضف هذا السطر
+    "https://livocare-production.up.railway.app", 
+     "https://livocare-backend.onrender.com" # ✅ أضف هذا السطر
 ]
 
 CORS_ALLOWED_ORIGINS = [
@@ -213,6 +214,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://google-auth.onrender.com",
     "https://notification-service-2xej.onrender.com",
     "https://email-service-zc0r.onrender.com",
+    "https://livocare-backend.onrender.com"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -230,6 +232,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.onrender.com",
     "https://*.railway.app",
     "https://livocare-fronend.vercel.app",
+    "https://livocare-backend.onrender.com"
 ]
 
 CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
