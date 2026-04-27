@@ -1074,7 +1074,7 @@ def send_push_notification(request):
         message = request.data.get('message', 'لديك إشعار جديد')
         
         response = requests.post(
-            'https://notification-service-6nzm.onrender.com/notify/all',
+            'https://notification-service-ssgo.onrender.com/notify/all',
             json={'title': title, 'body': message, 'icon': '/logo192.png', 'url': '/dashboard'},
             timeout=10
         )
