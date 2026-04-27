@@ -26,8 +26,9 @@ ALLOWED_HOSTS = [
     '.onrender.com',
     '.railway.app',
     'livocare.onrender.com',
-    'livocare-fronend.onrender.com',
+    'livocare-frontend.onrender.com',
     'livocare-production.up.railway.app',  # ✅ أضف هذا السطر
+    'livocare-backend.onrender.com'
 ]
 
 # ==============================================================================
@@ -189,7 +190,7 @@ SIMPLE_JWT = {
 # ==============================================================================
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://livocare-fronend.onrender.com",
+    "https://livocare-frontend.onrender.com",
     "https://camera-service-fag3.onrender.com",
     "https://google-auth.onrender.com",
     "https://notification-service-2xej.onrender.com",
@@ -207,7 +208,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://192.168.8.187:8000",
-    "https://livocare-fronend.onrender.com",
+    "https://livocare-frontend.onrender.com",
     "https://livocare-production.up.railway.app",
     "https://livocare-fronend.vercel.app",   # ✅ هذا مفقود!
     "https://camera-service-fag3.onrender.com",
@@ -244,8 +245,8 @@ GOOGLE_OAUTH2_SECRET = os.environ.get('GOOGLE_OAUTH2_SECRET', '')
 GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', 'https://google-auth.onrender.com/auth/google/callback')
 
 # Frontend URL
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://livocare-fronend.onrender.com')
-DJANGO_API_URL = os.environ.get('DJANGO_API_URL', 'https://livocare.onrender.com')
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'https://livocare-frontend.onrender.com')
+DJANGO_API_URL = os.environ.get('DJANGO_API_URL', 'https://livocare-backend.onrender.com')
 
 # ==============================================================================
 # 🔔 إعدادات الإشعارات
