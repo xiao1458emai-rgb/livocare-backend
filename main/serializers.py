@@ -63,12 +63,6 @@ class MoodEntrySerializer(serializers.ModelSerializer):
         model = MoodEntry
         exclude = ('user',) 
       
-# 5. القياسات الحيوية (الحالة الصحية)
-class HealthStatusSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = HealthStatus
-        exclude = ('user',)
-
 # 6. ✅ الوجبات (محدث)
 class MealSerializer(serializers.ModelSerializer):
     # ✅ إضافة حقل ingredients
@@ -380,11 +374,11 @@ class NotificationPreferencesSerializer(serializers.Serializer):
         return data
 
 # 5. القياسات الحيوية (الحالة الصحية) - نسخة محسنة
+# 5. القياسات الحيوية (الحالة الصحية) - نسخة محسنة
 class HealthStatusSerializer(serializers.ModelSerializer):
     class Meta:
         model = HealthStatus
         exclude = ('user',)
-        # ✅ أضف read_only_fields للتأكد من إعادة البيانات
         read_only_fields = ('id', 'recorded_at')
     
     def create(self, validated_data):
