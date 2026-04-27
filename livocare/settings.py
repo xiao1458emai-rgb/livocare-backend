@@ -220,20 +220,7 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = True
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://livocare-fronend.onrender.com",
-    "https://camera-service-fag3.onrender.com",
-    "https://google-auth.onrender.com",
-    "https://notification-service-2xej.onrender.com",
-    "https://email-service-zc0r.onrender.com",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://192.168.8.187:8000",
-    "https://*.onrender.com",
-    "https://*.railway.app",
-    "https://livocare-fronend.vercel.app",
-    "https://livocare-backend.onrender.com"
-]
+
 
 CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
 CORS_ALLOW_HEADERS = [
