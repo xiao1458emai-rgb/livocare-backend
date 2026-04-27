@@ -533,6 +533,71 @@ def manage_goals(request):
             return Response({'success': True, 'message': 'تم حذف الهدف بنجاح'})
         except HealthGoal.DoesNotExist:
             return Response({'success': False, 'error': 'الهدف غير موجود'}, status=404)
+# أضف هذه الدالة في main/views.py (إذا لم تكن موجودة)
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+@api_view(['GET', 'PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def manage_profile(request):
+    """إدارة الملف الشخصي - إصدار مبسط وآمن"""
+    user = request.user
+    
+    if request.method == 'GET':
+        return Response({
+            'success': True,
+            'data': {
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'date_of_birth': user.date_of_birth.isoformat() if user.date_of_birth else None,
+                'gender': user.gender,
+                'phone_number': user.phone_number,
+                'initial_weight': float(user.initial_weight) if user.initial_weight else None,
+                'height': float(user.height) if user.height else None,
+                'occupation_status': user.occupation_status,
+                'health_goal': user.health_goal,
+                'activity_level': user.activity_level,
+            }
+        })
+    
+    elif request.method in ['PUT', 'PATCH']:
+        data = request.data
+        allowed_fields = [
+            'first_name', 'last_name', 'date_of_birth', 'gender', 'phone_number',
+            'initial_weight', 'height', 'occupation_status',
+            'health_goal', 'activity_level'
+        ]
+        
+        for field in allowed_fields:
+            if field in data:
+                value = data[field]
+                if field in ['initial_weight', 'height']:
+                    try:
+                        value = float(value) if value else None
+                    except (ValueError, TypeError):
+                        value = None
+                setattr(user, field, value)
+        
+        user.save()
+        
+        return Response({
+            'success': True,
+            'message': 'Profile updated successfully',
+            'data': {
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'initial_weight': float(user.initial_weight) if user.initial_weight else None,
+                'height': float(user.height) if user.height else None,
+                'health_goal': user.health_goal,
+                'activity_level': user.activity_level,
+            }
+        })
 # ==============================================================================
 # 🌤️ 6. APIs الخارجية
 # ==============================================================================
