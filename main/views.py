@@ -1477,24 +1477,33 @@ def esp32_get_latest_health_status(request):
                 'message': 'لا توجد قراءات متاحة بعد'
             })
         
-        # ✅ استخدم spo2 من الموديل
-        spo2_value = latest_status.spo2 if hasattr(latest_status, 'spo2') else None
+        # ✅ الحصول على قيمة الأكسجين من الحقل الصحيح (تجنب AttributeError)
+        spo2_value = None
+        if hasattr(latest_status, 'blood_oxygen'):
+            spo2_value = latest_status.blood_oxygen
+        elif hasattr(latest_status, 'spo2'):
+            spo2_value = latest_status.spo2
+        elif hasattr(latest_status, 'oxygen_saturation'):
+            spo2_value = latest_status.oxygen_saturation
+        
+        # ✅ الحصول على قيمة النبض
+        heart_rate_value = latest_status.heart_rate if hasattr(latest_status, 'heart_rate') else None
         
         return Response({
             'status': 'success',
             'data': {
-                'heart_rate': latest_status.heart_rate,
-                'blood_oxygen': spo2_value,  # ✅ للتوافق مع Frontend
-                'recorded_at': latest_status.recorded_at.isoformat()
+                'heart_rate': heart_rate_value,
+                'blood_oxygen': spo2_value,
+                'recorded_at': latest_status.recorded_at.isoformat() if latest_status.recorded_at else None
             }
         })
         
     except Exception as e:
+        logger.error(f"ESP32 get latest error: {e}")
         return Response({
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1550,19 +1559,19 @@ def esp32_test_update(request):
                 'message': 'لا يوجد مستخدمين في النظام'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        # تحديث الحالة الصحية للمستخدم الأول
+        # ✅ تصحيح: استخدم spo2 بدلاً من blood_oxygen
         health_status, created = HealthStatus.objects.get_or_create(
             user=first_user,
             defaults={
                 'heart_rate': int(bpm),
-                'blood_oxygen': int(spo2),
+                'spo2': int(spo2),  # ✅ تغيير من blood_oxygen إلى spo2
                 'recorded_at': timezone.now()
             }
         )
         
         if not created:
             health_status.heart_rate = int(bpm)
-            health_status.blood_oxygen = int(spo2)
+            health_status.spo2 = int(spo2)  # ✅ تغيير من blood_oxygen إلى spo2
             health_status.recorded_at = timezone.now()
             health_status.save()
         
@@ -1572,7 +1581,8 @@ def esp32_test_update(request):
             'data': {
                 'user': first_user.username,
                 'heart_rate': health_status.heart_rate,
-                'blood_oxygen': health_status.blood_oxygen
+                'blood_oxygen': health_status.spo2,  # ✅ للتوافق مع Frontend
+                'spo2': health_status.spo2
             }
         }, status=status.HTTP_200_OK)
         
@@ -1581,8 +1591,6 @@ def esp32_test_update(request):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
 # ==============================================================================
 # 🔓 19. نسخة تجريبية بدون توثيق (للتجربة فقط - يمكنك إزالتها لاحقاً)
 # ==============================================================================
