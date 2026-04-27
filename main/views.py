@@ -1520,6 +1520,64 @@ def esp32_get_health_history(request):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+# أضف هذه الدالة مع دوال ESP32 الأخرى
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def esp32_test_update(request):
+    """
+    نسخة تجريبية - تحديث بدون توثيق (للتجربة فقط)
+    """
+    try:
+        bpm = request.data.get('bpm')
+        spo2 = request.data.get('spo2')
+        
+        if bpm is None or spo2 is None:
+            return Response({
+                'status': 'error',
+                'message': 'Missing bpm or spo2'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # استخدام أول مستخدم في النظام للتجربة
+        first_user = CustomUser.objects.filter(is_active=True).first()
+        
+        if not first_user:
+            return Response({
+                'status': 'error',
+                'message': 'لا يوجد مستخدمين في النظام'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # تحديث الحالة الصحية للمستخدم الأول
+        health_status, created = HealthStatus.objects.get_or_create(
+            user=first_user,
+            defaults={
+                'heart_rate': int(bpm),
+                'blood_oxygen': int(spo2),
+                'recorded_at': timezone.now()
+            }
+        )
+        
+        if not created:
+            health_status.heart_rate = int(bpm)
+            health_status.blood_oxygen = int(spo2)
+            health_status.recorded_at = timezone.now()
+            health_status.save()
+        
+        return Response({
+            'status': 'success',
+            'message': 'Data received (test mode)',
+            'data': {
+                'user': first_user.username,
+                'heart_rate': health_status.heart_rate,
+                'blood_oxygen': health_status.blood_oxygen
+            }
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==============================================================================

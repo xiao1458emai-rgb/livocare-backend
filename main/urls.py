@@ -5,7 +5,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView 
 from django.http import JsonResponse  
 from main.views import (
-    # ✅ جميع الدوال المستوردة (كما هي موجودة عندك)
+    # ✅ جميع الدوال المستوردة
     scan_barcode, advanced_cross_insights, cross_insights, google_auth,
     trigger_notifications, generate_notifications_now,
     push_subscribe,
@@ -28,6 +28,10 @@ from main.views import (
     search_medication, get_medication_details, get_user_medications,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
+    # ✅ أضف دوال ESP32
+    esp32_update_health_status,
+    esp32_get_latest_health_status,
+    esp32_get_health_history,
 )
 from main import views
 
@@ -52,12 +56,18 @@ router.register(r'notifications', views.NotificationViewSet, basename='notificat
 router.register(r'environment-data', views.EnvironmentDataViewSet, basename='environment-data')
 
 # =========================================================
-# ✅ المسارات الأساسية المعدلة (هذا هو الجزء المهم)
+# ✅ مسارات ESP32 (قسم منفصل)
+# =========================================================
+esp32_urls = [
+    path('esp32/update/', esp32_update_health_status, name='esp32-update'),
+    path('esp32/latest/', esp32_get_latest_health_status, name='esp32-latest'),
+    path('esp32/history/', esp32_get_health_history, name='esp32-history'),
+]
+
+# =========================================================
+# ✅ المسارات الأساسية المعدلة
 # =========================================================
 base_urls = [
-    # 🔐 المصادقة - ✅ تم إزالة المسارات القديمة لأنها موجودة في الملف الرئيسي
-    # لا تضع أي مسارات لـ token هنا لأنها موجودة في livocare/urls.py
-    
     # 🧠 التحليلات الذكية
     path('advanced-insights/', advanced_cross_insights, name='advanced-insights'),
     path('cross-insights/', cross_insights, name='cross-insights'),
@@ -87,16 +97,10 @@ base_urls = [
     # 📷 ماسح الباركود
     path('scan-barcode/', scan_barcode, name='scan-barcode'),
     
-# =========================================================
-# ✅ مسارات ESP32 (أضف هذا القسم الجديد)
-# =========================================================
-    # 🤖 قراءات ESP32 - مع توثيق (للاستخدام الحقيقي)
-    path('esp32/update/', views.esp32_update_health_status, name='esp32-update'),
-    path('esp32/latest/', views.esp32_get_latest_health_status, name='esp32-latest'),
-    path('esp32/history/', views.esp32_get_health_history, name='esp32-history'),
-    
-    # 🔓 نسخة تجريبية (للتجربة فقط - يمكنك إزالتها لاحقاً)
-    path('esp32/test/', views.esp32_test_update, name='esp32-test'),
+    # ⌚ بيانات الساعة الذكية
+    path('watch/health-data/', watch_health_data, name='watch_health_data'),
+    path('watch/history/', watch_history, name='watch_history'),
+    path('watch/adb-data/', adb_watch_data, name='adb_watch_data'),
     
     # 🩺 الأدوية
     path('medications/search/', search_medication, name='search-medication'),
@@ -175,6 +179,7 @@ notification_custom_urls = [
 urlpatterns = [
     path('', include(router.urls)),
     *notification_custom_urls,
+    *esp32_urls,  # ✅ أضف مسارات ESP32 هنا
     *base_urls,
 ]
 
