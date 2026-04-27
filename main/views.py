@@ -1362,60 +1362,226 @@ def cron_test_simple(request):
 
 
 # ==============================================================================
-# ⌚ 13. بيانات الساعة الذكية
+# 🤖 18. دوال ESP32 - تحديث العلامات الحيوية مباشرة
 # ==============================================================================
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def watch_health_data(request):
+def esp32_update_health_status(request):
+    """
+    تحديث حالة العلامات الحيوية للمستخدم الحالي من قراءات ESP32
+    """
     try:
-        data = request.data
-        heart_rate = data.get('heart_rate') or data.get('heartRate')
-        systolic = data.get('systolic_pressure') or data.get('systolic')
-        diastolic = data.get('diastolic_pressure') or data.get('diastolic')
-        recorded_at = data.get('recorded_at') or data.get('timestamp') or timezone.now()
+        user = request.user
+        bpm = request.data.get('bpm')
+        spo2 = request.data.get('spo2')
         
-        health_data = HealthStatus.objects.create(
-            user=request.user, heart_rate=heart_rate,
-            systolic_pressure=systolic, diastolic_pressure=diastolic, recorded_at=recorded_at
+        # التحقق من وجود البيانات
+        if bpm is None or spo2 is None:
+            return Response({
+                'status': 'error',
+                'message': 'البيانات غير مكتملة - مطلوب bpm و spo2'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # تنظير القيم
+        try:
+            bpm = int(bpm)
+            spo2 = int(spo2)
+        except (ValueError, TypeError):
+            return Response({
+                'status': 'error',
+                'message': 'القيم يجب أن تكون أرقاماً صحيحة'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # التحقق من صحة القيم
+        if bpm < 30 or bpm > 250:
+            return Response({
+                'status': 'warning',
+                'message': f'قراءة النبض غير طبيعية: {bpm} BPM',
+                'data': {'bpm': bpm, 'spo2': spo2}
+            }, status=status.HTTP_200_OK)
+        
+        if spo2 < 70 or spo2 > 100:
+            return Response({
+                'status': 'warning',
+                'message': f'قراءة الأكسجين غير طبيعية: {spo2}%',
+                'data': {'bpm': bpm, 'spo2': spo2}
+            }, status=status.HTTP_200_OK)
+        
+        # ✅ تحديث أو إنشاء حالة صحية للمستخدم الحالي
+        health_status, created = HealthStatus.objects.get_or_create(
+            user=user,
+            defaults={
+                'heart_rate': bpm,
+                'blood_oxygen': spo2,
+                'recorded_at': timezone.now()
+            }
         )
         
-        return Response({'success': True, 'data': {'id': health_data.id}})
+        if not created:
+            # تحديث القراءة الحالية
+            health_status.heart_rate = bpm
+            health_status.blood_oxygen = spo2
+            health_status.recorded_at = timezone.now()
+            health_status.save()
+        
+        # ✅ إنشاء إشعار تلقائي إذا كانت القراءات خطرة
+        if bpm > 120 or bpm < 50 or spo2 < 90:
+            Notification.objects.create(
+                user=user,
+                title='⚠️ تنبيه صحي',
+                message=f'قراءات غير طبيعية: نبض {bpm} BPM، أكسجين {spo2}%',
+                type='alert',
+                priority='high',
+                action_url='/health',
+                is_read=False
+            )
+        
+        return Response({
+            'status': 'success',
+            'message': 'تم تحديث القراءات بنجاح',
+            'data': {
+                'user_id': user.id,
+                'username': user.username,
+                'heart_rate': health_status.heart_rate,
+                'blood_oxygen': health_status.blood_oxygen,
+                'recorded_at': health_status.recorded_at.isoformat()
+            }
+        }, status=status.HTTP_200_OK)
+        
     except Exception as e:
-        return Response({'success': False, 'error': str(e)}, status=500)
+        logger.error(f"ESP32 update error: {e}")
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def watch_history(request):
+def esp32_get_latest_health_status(request):
+    """
+    جلب آخر قراءة للعلامات الحيوية للمستخدم الحالي
+    """
     try:
-        data = HealthStatus.objects.filter(user=request.user).order_by('-recorded_at')[:50]
-        result = [{'id': item.id, 'heart_rate': item.heart_rate, 'recorded_at': item.recorded_at.isoformat()} for item in data]
-        return Response({'success': True, 'data': result})
+        user = request.user
+        
+        # جلب أحدث حالة صحية للمستخدم
+        latest_status = HealthStatus.objects.filter(user=user).order_by('-recorded_at').first()
+        
+        if not latest_status:
+            return Response({
+                'status': 'success',
+                'data': None,
+                'message': 'لا توجد قراءات متاحة بعد'
+            })
+        
+        return Response({
+            'status': 'success',
+            'data': {
+                'heart_rate': latest_status.heart_rate,
+                'blood_oxygen': latest_status.blood_oxygen,
+                'recorded_at': latest_status.recorded_at.isoformat()
+            }
+        })
+        
     except Exception as e:
-        return Response({'success': False, 'error': str(e)}, status=500)
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def esp32_get_health_history(request):
+    """
+    جلب تاريخ قراءات العلامات الحيوية (آخر 50 قراءة)
+    """
+    try:
+        user = request.user
+        
+        readings = HealthStatus.objects.filter(user=user).order_by('-recorded_at')[:50]
+        
+        data = [{
+            'heart_rate': r.heart_rate,
+            'blood_oxygen': r.blood_oxygen,
+            'recorded_at': r.recorded_at.isoformat()
+        } for r in readings if r.heart_rate or r.blood_oxygen]
+        
+        return Response({
+            'status': 'success',
+            'count': len(data),
+            'data': data
+        })
+        
+    except Exception as e:
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==============================================================================
+# 🔓 19. نسخة تجريبية بدون توثيق (للتجربة فقط - يمكنك إزالتها لاحقاً)
+# ==============================================================================
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def adb_watch_data(request):
-    """استقبال بيانات من ESP32"""
+@permission_classes([AllowAny])
+def esp32_test_update(request):
+    """
+    نسخة تجريبية - تحديث بدون توثيق (للتجربة فقط)
+    """
     try:
-        data = request.data
-        logger.info(f"📡 ESP32 data received: {data}")
+        bpm = request.data.get('bpm')
+        spo2 = request.data.get('spo2')
         
-        heart_rate = data.get('bpm') or data.get('heart_rate')
-        spo2 = data.get('spo2') or data.get('oxygen')
+        if bpm is None or spo2 is None:
+            return Response({
+                'status': 'error',
+                'message': 'Missing bpm or spo2'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        health_data = HealthStatus.objects.create(
-            user=request.user, heart_rate=heart_rate, spo2=spo2, recorded_at=timezone.now()
+        # استخدام أول مستخدم في النظام للتجربة
+        first_user = CustomUser.objects.filter(is_active=True).first()
+        
+        if not first_user:
+            return Response({
+                'status': 'error',
+                'message': 'لا يوجد مستخدمين في النظام'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # تحديث الحالة الصحية للمستخدم الأول
+        health_status, created = HealthStatus.objects.get_or_create(
+            user=first_user,
+            defaults={
+                'heart_rate': int(bpm),
+                'blood_oxygen': int(spo2),
+                'recorded_at': timezone.now()
+            }
         )
         
-        return Response({'success': True, 'data': {'id': health_data.id}})
+        if not created:
+            health_status.heart_rate = int(bpm)
+            health_status.blood_oxygen = int(spo2)
+            health_status.recorded_at = timezone.now()
+            health_status.save()
+        
+        return Response({
+            'status': 'success',
+            'message': 'Data received (test mode)',
+            'data': {
+                'user': first_user.username,
+                'heart_rate': health_status.heart_rate,
+                'blood_oxygen': health_status.blood_oxygen
+            }
+        }, status=status.HTTP_200_OK)
+        
     except Exception as e:
-        logger.error(f"❌ ESP32 data error: {e}")
-        return Response({'success': False, 'error': str(e)}, status=500)
-
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # ==============================================================================
 # 📷 14. ماسح الباركود

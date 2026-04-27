@@ -87,10 +87,16 @@ base_urls = [
     # 📷 ماسح الباركود
     path('scan-barcode/', scan_barcode, name='scan-barcode'),
     
-    # ⌚ بيانات الساعة الذكية
-    path('watch/health-data/', watch_health_data, name='watch_health_data'),
-    path('watch/history/', watch_history, name='watch_history'),
-    path('watch/adb-data/', adb_watch_data, name='adb_watch_data'),
+# =========================================================
+# ✅ مسارات ESP32 (أضف هذا القسم الجديد)
+# =========================================================
+    # 🤖 قراءات ESP32 - مع توثيق (للاستخدام الحقيقي)
+    path('esp32/update/', views.esp32_update_health_status, name='esp32-update'),
+    path('esp32/latest/', views.esp32_get_latest_health_status, name='esp32-latest'),
+    path('esp32/history/', views.esp32_get_health_history, name='esp32-history'),
+    
+    # 🔓 نسخة تجريبية (للتجربة فقط - يمكنك إزالتها لاحقاً)
+    path('esp32/test/', views.esp32_test_update, name='esp32-test'),
     
     # 🩺 الأدوية
     path('medications/search/', search_medication, name='search-medication'),
