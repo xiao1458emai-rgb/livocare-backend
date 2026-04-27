@@ -1,38 +1,32 @@
-# main/urls.py
+# main/urls.py - النسخة المعدلة بالكامل
+
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView 
 from django.http import JsonResponse  
 from main.views import (
-    # ✅ جميع الدوال المستوردة
+    # ✅ جميع الدوال المستوردة (كما هي موجودة عندك)
     scan_barcode, advanced_cross_insights, cross_insights, google_auth,
     trigger_notifications, generate_notifications_now,
     push_subscribe,
     RegisterUserView,
-    # ✅ إدارة الحساب
     manage_profile, change_password, delete_my_account,
     export_all_data, backup_data, restore_backup,
     user_settings, manage_goals,
-    # ✅ الإشعارات
     create_notification, get_notifications,
     mark_notification_read, mark_all_notifications_read,
     delete_notification, delete_all_read_notifications,
     get_my_notifications, get_notifications_simple, create_test_notifications,
-    # ✅ دوال إضافية
     save_notification_from_sw, send_push_notification,
     check_and_send_smart_notifications, send_daily_summary_notification,
     send_morning_tip, send_notifications_to_all_users,
     cron_daily_summary, cron_morning_tip, cron_smart_notifications,
     cron_test_simple,
-    # ✅ APIs خارجية
     get_weather, search_food, suggest_exercises, analyze_sentiment,
     get_smart_recommendations,
-    # ✅ بيانات الساعة
     watch_health_data, watch_history, adb_watch_data,
-    # ✅ الأدوية
     search_medication, get_medication_details, get_user_medications,
     add_user_medication, delete_user_medication,
-    # ✅ أخرى
     get_user_achievements, test_websocket, smart_insights,
 )
 from main import views
@@ -57,14 +51,12 @@ router.register(r'chat-logs', views.ChatLogViewSet, basename='chat-logs')
 router.register(r'notifications', views.NotificationViewSet, basename='notifications')
 router.register(r'environment-data', views.EnvironmentDataViewSet, basename='environment-data')
 
-
 # =========================================================
-# ✅ المسارات الأساسية
+# ✅ المسارات الأساسية المعدلة (هذا هو الجزء المهم)
 # =========================================================
 base_urls = [
-    # 🔐 المصادقة
-    path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('auth/google/', google_auth, name='google_auth'),
+    # 🔐 المصادقة - ✅ تم إزالة المسارات القديمة لأنها موجودة في الملف الرئيسي
+    # لا تضع أي مسارات لـ token هنا لأنها موجودة في livocare/urls.py
     
     # 🧠 التحليلات الذكية
     path('advanced-insights/', advanced_cross_insights, name='advanced-insights'),
@@ -72,6 +64,7 @@ base_urls = [
     path('analytics/smart-insights/', smart_insights, name='smart-insights'),
     path('analytics/cross-insights/', cross_insights, name='cross-insights-alt'),
     path('blood-sugar/', views.get_blood_sugar, name='blood-sugar'),
+    
     # 🌤️ الطقس
     path('weather/', get_weather, name='weather'),
     
@@ -132,10 +125,7 @@ base_urls = [
     path('notifications/delete-all-read/', delete_all_read_notifications, name='delete-all-read-notifications'),
     path('my-notifications/', get_my_notifications, name='my-notifications'),
     path('sw-notification/', save_notification_from_sw, name='sw-notification'),
-    path('auth/register/', RegisterUserView.as_view(), name='register'),
-    path('notifications-simple/', get_notifications_simple, name='notifications-simple'),
-    path('fix-notifications-dates/', views.fix_notifications_dates, name='fix-notifications-dates'),
-
+    
     # 🤖 إشعارات ذكية
     path('smart-notifications/', check_and_send_smart_notifications, name='smart-notifications'),
     path('daily-summary/', send_daily_summary_notification, name='daily-summary'),
@@ -143,21 +133,13 @@ base_urls = [
     path('notify-all-users/', send_notifications_to_all_users, name='notify-all-users'),
     path('generate-notifications/', generate_notifications_now, name='generate-notifications'),
     
-    # 📅 مسارات Cron Jobs
-    path('cron/daily-summary/', cron_daily_summary, name='cron-daily-summary'),
-    path('cron/morning-tip/', cron_morning_tip, name='cron-morning-tip'),
-    path('cron/smart-notifications/', cron_smart_notifications, name='cron-smart-notifications'),
-    path('cron/test/', cron_test_simple, name='cron-test'),
-    path('trigger-notifications/', trigger_notifications, name='trigger-notifications'),
-    
     # 🧪 اختبارات
     path('test-simple/', lambda request: JsonResponse({'status': 'ok', 'message': 'Test endpoint works!'}), name='test-simple'),
     path('test-websocket/', test_websocket, name='test-websocket'),
 ]
 
-
 # =========================================================
-# ✅ مسارات الإشعارات المخصصة (إضافات NotificationViewSet)
+# ✅ مسارات الإشعارات المخصصة
 # =========================================================
 notification_custom_urls = [
     path('notifications/unread-count/', 
@@ -181,7 +163,6 @@ notification_custom_urls = [
          name='notification-delete-all-read'),
 ]
 
-
 # =========================================================
 # ✅ دمج جميع المسارات
 # =========================================================
@@ -191,9 +172,8 @@ urlpatterns = [
     *base_urls,
 ]
 
-
 # =========================================================
-# ✅ معالجة الأخطاء (404, 500)
+# ✅ معالجة الأخطاء
 # =========================================================
 def handler404(request, exception):
     from main.views import get_request_language
@@ -203,7 +183,6 @@ def handler404(request, exception):
         'error': 'الصفحة غير موجودة' if is_arabic else 'Page not found',
         'language': 'ar' if is_arabic else 'en'
     }, status=404)
-
 
 def handler500(request):
     from main.views import get_request_language
