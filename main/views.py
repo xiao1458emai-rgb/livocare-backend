@@ -1360,7 +1360,6 @@ def cron_test_simple(request):
         'timestamp': timezone.now().isoformat()
     })
 
-
 # ==============================================================================
 # 🤖 18. دوال ESP32 - تحديث العلامات الحيوية مباشرة
 # ==============================================================================
@@ -1409,11 +1408,12 @@ def esp32_update_health_status(request):
             }, status=status.HTTP_200_OK)
         
         # ✅ تحديث أو إنشاء حالة صحية للمستخدم الحالي
+        # استخدم spo2 بدلاً من blood_oxygen
         health_status, created = HealthStatus.objects.get_or_create(
             user=user,
             defaults={
                 'heart_rate': bpm,
-                'blood_oxygen': spo2,
+                'spo2': spo2,  # ✅ استخدم الحقل الموجود
                 'recorded_at': timezone.now()
             }
         )
@@ -1421,7 +1421,7 @@ def esp32_update_health_status(request):
         if not created:
             # تحديث القراءة الحالية
             health_status.heart_rate = bpm
-            health_status.blood_oxygen = spo2
+            health_status.spo2 = spo2  # ✅ استخدم الحقل الموجود
             health_status.recorded_at = timezone.now()
             health_status.save()
         
@@ -1444,7 +1444,8 @@ def esp32_update_health_status(request):
                 'user_id': user.id,
                 'username': user.username,
                 'heart_rate': health_status.heart_rate,
-                'blood_oxygen': health_status.blood_oxygen,
+                'blood_oxygen': spo2,  # ✅ للتوافق مع Frontend
+                'spo2': health_status.spo2,
                 'recorded_at': health_status.recorded_at.isoformat()
             }
         }, status=status.HTTP_200_OK)
@@ -1476,11 +1477,14 @@ def esp32_get_latest_health_status(request):
                 'message': 'لا توجد قراءات متاحة بعد'
             })
         
+        # ✅ استخدم spo2 من الموديل
+        spo2_value = latest_status.spo2 if hasattr(latest_status, 'spo2') else None
+        
         return Response({
             'status': 'success',
             'data': {
                 'heart_rate': latest_status.heart_rate,
-                'blood_oxygen': latest_status.blood_oxygen,
+                'blood_oxygen': spo2_value,  # ✅ للتوافق مع Frontend
                 'recorded_at': latest_status.recorded_at.isoformat()
             }
         })
@@ -1505,9 +1509,9 @@ def esp32_get_health_history(request):
         
         data = [{
             'heart_rate': r.heart_rate,
-            'blood_oxygen': r.blood_oxygen,
+            'blood_oxygen': r.spo2 if hasattr(r, 'spo2') else None,  # ✅ استخدم spo2
             'recorded_at': r.recorded_at.isoformat()
-        } for r in readings if r.heart_rate or r.blood_oxygen]
+        } for r in readings if r.heart_rate or (hasattr(r, 'spo2') and r.spo2)]
         
         return Response({
             'status': 'success',
@@ -1520,7 +1524,6 @@ def esp32_get_health_history(request):
             'status': 'error',
             'message': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-# أضف هذه الدالة مع دوال ESP32 الأخرى
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
