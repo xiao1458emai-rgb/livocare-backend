@@ -67,6 +67,8 @@ esp32_urls = [
 # ✅ المسارات الأساسية (بدون مسارات الساعة الذكية)
 # =========================================================
 base_urls = [
+        # 🔐 مصادقة Google
+    path('auth/google/', google_auth, name='google_auth'), 
     # 🧠 التحليلات الذكية
     path('advanced-insights/', advanced_cross_insights, name='advanced-insights'),
     path('cross-insights/', cross_insights, name='cross-insights'),

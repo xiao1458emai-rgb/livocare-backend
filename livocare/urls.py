@@ -23,7 +23,6 @@ urlpatterns = [
     path('api/auth/register/', RegisterUserView.as_view(), name='user_register'),
     path('api/auth/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('api/auth/google/', include('main.google_auth')),  
     
     # ==========================================================================
     # 📊 التحليلات والملخصات
