@@ -68,7 +68,7 @@ class MoodEntrySerializer(serializers.ModelSerializer):
 
 class MealSerializer(serializers.ModelSerializer):
     """
-    سيرياليزر للوجبات - يحسب الإجماليات تلقائياً من المكونات
+    سيرياليزر للوجبات - نسخة مبسطة وآمنة
     """
     
     class Meta:
@@ -79,84 +79,31 @@ class MealSerializer(serializers.ModelSerializer):
             'total_calories', 'total_protein', 'total_carbs', 'total_fat',
             'created_at'
         ]
-        read_only_fields = ['total_calories', 'total_protein', 'total_carbs', 'total_fat', 'created_at']
+        read_only_fields = ['created_at']
     
-    def _calculate_totals(self, ingredients):
-        """
-        حساب الإجماليات من المكونات
-        كل مكون يحتوي على: name, quantity, unit, calories, protein, carbs, fat
-        القيم الغذائية تكون لكل 100 جرام/مل
-        """
-        total_calories = 0
-        total_protein = 0
-        total_carbs = 0
-        total_fat = 0
+    def validate_ingredients(self, value):
+        """التحقق من صحة المكونات"""
+        if not isinstance(value, list):
+            raise serializers.ValidationError("المكونات يجب أن تكون قائمة")
         
-        for ingredient in ingredients:
-            # استخراج القيم
-            quantity = float(ingredient.get('quantity', 100))
-            calories_per_100 = float(ingredient.get('calories', 0))
-            protein_per_100 = float(ingredient.get('protein', 0))
-            carbs_per_100 = float(ingredient.get('carbs', 0))
-            fat_per_100 = float(ingredient.get('fat', 0))
-            
-            # حساب النسبة (القيم لكل 100 جرام، نحسب حسب الكمية الفعلية)
-            ratio = quantity / 100
-            
-            # إضافة إلى الإجمالي
-            total_calories += calories_per_100 * ratio
-            total_protein += protein_per_100 * ratio
-            total_carbs += carbs_per_100 * ratio
-            total_fat += fat_per_100 * ratio
+        for item in value:
+            if not isinstance(item, dict):
+                raise serializers.ValidationError("كل مكون يجب أن يكون كائن JSON")
+            if not item.get('name'):
+                raise serializers.ValidationError("اسم المكون مطلوب")
         
-        return {
-            'total_calories': round(total_calories),
-            'total_protein': round(total_protein, 1),
-            'total_carbs': round(total_carbs, 1),
-            'total_fat': round(total_fat, 1)
-        }
+        return value
     
     def create(self, validated_data):
-        """إنشاء وجبة جديدة - حساب الإجماليات من المكونات"""
-        ingredients = validated_data.get('ingredients', [])
-        
-        # حساب الإجماليات
-        totals = self._calculate_totals(ingredients)
-        
-        # إنشاء الوجبة
-        meal = Meal.objects.create(
-            user=validated_data['user'],
-            meal_type=validated_data['meal_type'],
-            meal_time=validated_data['meal_time'],
-            notes=validated_data.get('notes', ''),
-            ingredients=ingredients,
-            total_calories=totals['total_calories'],
-            total_protein=totals['total_protein'],
-            total_carbs=totals['total_carbs'],
-            total_fat=totals['total_fat']
-        )
-        
+        """إنشاء وجبة جديدة"""
+        # إضافة المستخدم (سيتم تعيينه في ViewSet)
+        meal = Meal.objects.create(**validated_data)
         return meal
     
     def update(self, instance, validated_data):
-        """تحديث وجبة موجودة - إعادة حساب الإجماليات"""
-        # تحديث الحقول
-        instance.meal_type = validated_data.get('meal_type', instance.meal_type)
-        instance.meal_time = validated_data.get('meal_time', instance.meal_time)
-        instance.notes = validated_data.get('notes', instance.notes)
-        
-        # تحديث المكونات إذا وجدت
-        if 'ingredients' in validated_data:
-            ingredients = validated_data['ingredients']
-            instance.ingredients = ingredients
-            
-            # إعادة حساب الإجماليات
-            totals = self._calculate_totals(ingredients)
-            instance.total_calories = totals['total_calories']
-            instance.total_protein = totals['total_protein']
-            instance.total_carbs = totals['total_carbs']
-            instance.total_fat = totals['total_fat']
-        
+        """تحديث وجبة موجودة"""
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
         instance.save()
         return instance
 
