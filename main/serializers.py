@@ -66,6 +66,7 @@ class MoodEntrySerializer(serializers.ModelSerializer):
 # 6. ✅ الوجبات (محدث)
 # في serializers.py - استبدل MealSerializer بهذا
 
+# في serializers.py
 class MealSerializer(serializers.ModelSerializer):
     ingredients = serializers.JSONField(required=False, default=list)
     
@@ -74,7 +75,13 @@ class MealSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id', 'created_at']
     
+    def validate(self, data):
+        """التحقق من صحة البيانات قبل الحفظ"""
+        print(f"📥 Validating meal data: {data}")  # ✅ للتصحيح
+        return data
+    
     def create(self, validated_data):
+        print(f"📝 Creating meal with data: {validated_data}")  # ✅ للتصحيح
         if 'ingredients' not in validated_data:
             validated_data['ingredients'] = []
         return super().create(validated_data)
