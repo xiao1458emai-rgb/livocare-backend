@@ -67,45 +67,17 @@ class MoodEntrySerializer(serializers.ModelSerializer):
 # في serializers.py - استبدل MealSerializer بهذا
 
 class MealSerializer(serializers.ModelSerializer):
-    """
-    سيرياليزر للوجبات - نسخة مبسطة وآمنة
-    """
+    ingredients = serializers.JSONField(required=False, default=list)
     
     class Meta:
         model = Meal
-        fields = [
-            'id', 'meal_type', 'meal_time', 'notes',
-            'ingredients',
-            'total_calories', 'total_protein', 'total_carbs', 'total_fat',
-            'created_at'
-        ]
-        read_only_fields = ['created_at']
-    
-    def validate_ingredients(self, value):
-        """التحقق من صحة المكونات"""
-        if not isinstance(value, list):
-            raise serializers.ValidationError("المكونات يجب أن تكون قائمة")
-        
-        for item in value:
-            if not isinstance(item, dict):
-                raise serializers.ValidationError("كل مكون يجب أن يكون كائن JSON")
-            if not item.get('name'):
-                raise serializers.ValidationError("اسم المكون مطلوب")
-        
-        return value
+        fields = '__all__'
     
     def create(self, validated_data):
-        """إنشاء وجبة جديدة"""
-        # إضافة المستخدم (سيتم تعيينه في ViewSet)
-        meal = Meal.objects.create(**validated_data)
-        return meal
-    
-    def update(self, instance, validated_data):
-        """تحديث وجبة موجودة"""
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        return instance
+        # ✅ تأكد من أن ingredients موجود
+        if 'ingredients' not in validated_data:
+            validated_data['ingredients'] = []
+        return super().create(validated_data)
 
 # 7. المكون الغذائي (FoodItem) - للتوافق مع الإصدارات القديمة
 class FoodItemSerializer(serializers.ModelSerializer):
