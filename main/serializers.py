@@ -73,18 +73,7 @@ class MealSerializer(serializers.ModelSerializer):
     class Meta:
         model = Meal
         fields = '__all__'
-        read_only_fields = ['id', 'created_at']
-    
-    def validate(self, data):
-        """التحقق من صحة البيانات قبل الحفظ"""
-        print(f"📥 Validating meal data: {data}")  # ✅ للتصحيح
-        return data
-    
-    def create(self, validated_data):
-        print(f"📝 Creating meal with data: {validated_data}")  # ✅ للتصحيح
-        if 'ingredients' not in validated_data:
-            validated_data['ingredients'] = []
-        return super().create(validated_data)
+        read_only_fields = ['id', 'created_at', 'user']  # ✅ أضف 'user' هنا
 
 # 7. المكون الغذائي (FoodItem) - للتوافق مع الإصدارات القديمة
 class FoodItemSerializer(serializers.ModelSerializer):
