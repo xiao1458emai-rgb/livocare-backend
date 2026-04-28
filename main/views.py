@@ -1820,11 +1820,13 @@ def test_websocket(request):
 # 🔐 17. مصادقة Google
 # ==============================================================================
 
+# main/views.py - أضف أو عدّل هذه الدالة
+
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth.models import User
+from main.models import CustomUser  # ✅ استخدم نموذج المستخدم المخصص
 import json
 
 @csrf_exempt
@@ -1834,29 +1836,47 @@ def google_auth(request):
         data = json.loads(request.body)
         email = data.get('email')
         name = data.get('name', '')
+        google_id = data.get('google_id', '')
         
         if not email:
             return JsonResponse({'error': 'Email is required'}, status=400)
         
-        # ✅ تجنب تكرار اسم المستخدم
+        # ✅ إنشاء اسم مستخدم فريد من البريد الإلكتروني
         base_username = email.split('@')[0]
         username = base_username
         counter = 1
         
-        while User.objects.filter(username=username).exists():
+        # ✅ التأكد من أن اسم المستخدم فريد
+        while CustomUser.objects.filter(username=username).exists():
             username = f"{base_username}{counter}"
             counter += 1
         
-        # ✅ إنشاء المستخدم أو جلبه
-        user, created = User.objects.get_or_create(
+        # ✅ تقسيم الاسم الكامل إلى اسم أول واسم عائلة
+        name_parts = name.split(' ', 1) if name else ['', '']
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+        # ✅ إنشاء المستخدم أو جلبه باستخدام CustomUser
+        user, created = CustomUser.objects.get_or_create(
             email=email,
             defaults={
                 'username': username,
-                'first_name': name.split()[0] if name else '',
+                'first_name': first_name,
+                'last_name': last_name,
+                # ✅ الحقول الإضافية من CustomUser
+                'gender': None,  # سيطلب من المستخدم إكماله لاحقاً
+                'health_goal': None,  # سيطلب من المستخدم إكماله لاحقاً
+                'activity_level': None,  # سيطلب من المستخدم إكماله لاحقاً
             }
         )
         
-        # ✅ إنشاء التوكن
+        # ✅ إذا كان المستخدم موجوداً مسبقاً، تأكد من تحديث الاسم إذا كان فارغاً
+        if not created:
+            if not user.first_name and first_name:
+                user.first_name = first_name
+                user.save(update_fields=['first_name', 'last_name'])
+        
+        # ✅ إنشاء التوكن JWT
         refresh = RefreshToken.for_user(user)
         
         return JsonResponse({
@@ -1865,14 +1885,16 @@ def google_auth(request):
             'user': {
                 'id': user.id,
                 'username': user.username,
-                'email': user.email
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name
             }
         })
         
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as e:
-        print(f"❌ Google auth error: {str(e)}")  # ✅ سجل الخطأ
+        print(f"❌ Google auth error: {str(e)}")
         return JsonResponse({'error': str(e)}, status=500)
 # أضف هذا في نهاية main/views.py
 
