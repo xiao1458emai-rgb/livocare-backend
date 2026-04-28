@@ -72,9 +72,9 @@ class MealSerializer(serializers.ModelSerializer):
     class Meta:
         model = Meal
         fields = '__all__'
+        read_only_fields = ['id', 'created_at']
     
     def create(self, validated_data):
-        # ✅ تأكد من أن ingredients موجود
         if 'ingredients' not in validated_data:
             validated_data['ingredients'] = []
         return super().create(validated_data)
