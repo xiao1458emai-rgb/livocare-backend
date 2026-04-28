@@ -634,39 +634,117 @@ def get_weather(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def search_food(request):
-    """البحث عن الطعام"""
+    """البحث عن الطعام في Open Food Facts"""
     try:
-        query = request.query_params.get('query', '')
+        query = request.query_params.get('query', '').strip()
         if not query:
-            return Response({'success': False, 'error': 'الرجاء إدخال اسم الطعام', 'data': []}, status=400)
+            return Response({
+                'success': False, 
+                'error': 'الرجاء إدخال اسم الطعام', 
+                'data': []
+            }, status=400)
         
         from urllib.parse import quote
         encoded_query = quote(query)
+        
+        # ✅ URL الصحيح لـ Open Food Facts
         url = f"https://world.openfoodfacts.org/cgi/search.pl?search_terms={encoded_query}&search_simple=1&action=process&json=1&page_size=20"
         
-        headers = {'User-Agent': 'LivocareApp/1.0'}
-        response = requests.get(url, timeout=15, headers=headers)
+        headers = {
+            'User-Agent': 'LivocareApp/1.0 (https://livocare.onrender.com)'
+        }
         
+        # ✅ مهلة أقل (10 ثوانٍ كافية)
+        response = requests.get(url, timeout=10, headers=headers)
+        
+        # ✅ التحقق من الاستجابة
         if response.status_code == 200:
             data = response.json()
             products = []
+            
+            # ✅ استخراج المنتجات بشكل آمن
             for product in data.get('products', []):
                 product_name = product.get('product_name') or product.get('generic_name')
-                if product_name and len(product_name) > 1:
-                    products.append({
-                        'id': product.get('code'),
-                        'name': product_name,
-                        'brand': product.get('brands'),
-                        'image': product.get('image_front_small_url'),
-                        'calories': product.get('nutriments', {}).get('energy-kcal', 0),
-                    })
+                
+                # ✅ تجاهل المنتجات بدون اسم
+                if not product_name or len(product_name) < 2:
+                    continue
+                
+                # ✅ استخراج السعرات بشكل آمن
+                nutriments = product.get('nutriments', {})
+                calories = nutriments.get('energy-kcal', 0)
+                if calories == 0:
+                    calories = nutriments.get('energy_value', 0)
+                
+                # ✅ استخراج الصورة
+                image_url = product.get('image_front_small_url') or product.get('image_url')
+                
+                products.append({
+                    'id': product.get('code', ''),
+                    'name': product_name,
+                    'brand': product.get('brands', ''),
+                    'image': image_url,
+                    'calories': calories,
+                    'serving_size': product.get('serving_size', ''),
+                    'fat': nutriments.get('fat', 0),
+                    'protein': nutriments.get('proteins', 0),
+                    'carbs': nutriments.get('carbohydrates', 0)
+                })
             
-            return Response({'success': True, 'data': products, 'count': len(products)})
+            # ✅ حتى لو لم تكن هناك نتائج، نعيد success
+            if len(products) == 0:
+                return Response({
+                    'success': True,
+                    'data': [],
+                    'count': 0,
+                    'message': f'لم يتم العثور على نتائج لـ "{query}"'
+                })
+            
+            return Response({
+                'success': True,
+                'data': products,
+                'count': len(products)
+            })
         
-        return Response({'success': False, 'error': 'فشل في الاتصال بقاعدة البيانات', 'data': []}, status=500)
+        # ✅ خطأ من API الخارجي
+        elif response.status_code == 404:
+            return Response({
+                'success': True,
+                'data': [],
+                'count': 0,
+                'message': f'لا توجد نتائج لـ "{query}"'
+            })
+        else:
+            return Response({
+                'success': False,
+                'error': f'فشل الاتصال بقاعدة البيانات (رمز {response.status_code})',
+                'data': []
+            }, status=500)
+            
+    except requests.exceptions.Timeout:
+        # ✅ مهلة الاتصال
+        return Response({
+            'success': False,
+            'error': 'انتهى وقت الاتصال بقاعدة البيانات، يرجى المحاولة مرة أخرى',
+            'data': []
+        }, status=504)
+        
+    except requests.exceptions.ConnectionError:
+        # ✅ مشكلة في الاتصال بالإنترنت أو الخادم
+        return Response({
+            'success': False,
+            'error': 'لا يمكن الاتصال بقاعدة البيانات، تحقق من اتصالك بالإنترنت',
+            'data': []
+        }, status=503)
+        
     except Exception as e:
-        return Response({'success': False, 'error': str(e), 'data': []}, status=500)
-
+        # ✅ أي خطأ آخر
+        print(f"❌ Food search error: {e}")
+        return Response({
+            'success': False,
+            'error': 'حدث خطأ أثناء البحث، يرجى المحاولة مرة أخرى',
+            'data': []
+        }, status=500)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
