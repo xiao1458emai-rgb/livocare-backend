@@ -1820,38 +1820,60 @@ def test_websocket(request):
 # 🔐 17. مصادقة Google
 # ==============================================================================
 
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth.models import User
+import json
+
 @csrf_exempt
 @require_http_methods(["POST"])
 def google_auth(request):
     try:
         data = json.loads(request.body)
         email = data.get('email')
+        name = data.get('name', '')
         
         if not email:
             return JsonResponse({'error': 'Email is required'}, status=400)
         
-        name_parts = data.get('name', '').split(' ', 1)
-        first_name = name_parts[0]
-        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        # ✅ تجنب تكرار اسم المستخدم
+        base_username = email.split('@')[0]
+        username = base_username
+        counter = 1
         
+        while User.objects.filter(username=username).exists():
+            username = f"{base_username}{counter}"
+            counter += 1
+        
+        # ✅ إنشاء المستخدم أو جلبه
         user, created = User.objects.get_or_create(
             email=email,
             defaults={
-                'username': email.split('@')[0],
-                'first_name': first_name,
-                'last_name': last_name,
+                'username': username,
+                'first_name': name.split()[0] if name else '',
             }
         )
         
+        # ✅ إنشاء التوكن
         refresh = RefreshToken.for_user(user)
         
         return JsonResponse({
             'access': str(refresh.access_token),
             'refresh': str(refresh),
-            'user': {'id': user.id, 'username': user.username, 'email': user.email}
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email
+            }
         })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=400)
+        print(f"❌ Google auth error: {str(e)}")  # ✅ سجل الخطأ
+        return JsonResponse({'error': str(e)}, status=500)
 # أضف هذا في نهاية main/views.py
 
 class RegisterUserView(generics.CreateAPIView):
