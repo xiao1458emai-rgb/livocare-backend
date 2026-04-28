@@ -2023,3 +2023,39 @@ def fix_notifications_dates(request):
         })
     except Exception as e:
         return Response({'success': False, 'error': str(e)}, status=500)
+    
+import logging
+import traceback
+logger = logging.getLogger(__name__)
+
+class MealViewSet(viewsets.ModelViewSet):
+    serializer_class = MealSerializer
+    permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
+    
+    def get_queryset(self):
+        try:
+            return Meal.objects.filter(user=self.request.user).order_by('-meal_time')
+        except Exception as e:
+            logger.error(f"❌ MealViewSet.get_queryset error: {e}")
+            logger.error(traceback.format_exc())
+            return Meal.objects.none()
+    
+    def list(self, request, *args, **kwargs):
+        try:
+            queryset = self.get_queryset()
+            serializer = self.get_serializer(queryset, many=True)
+            return Response(serializer.data)
+        except Exception as e:
+            logger.error(f"❌ MealViewSet.list error: {e}")
+            logger.error(traceback.format_exc())
+            return Response(
+                {
+                    'error': str(e),
+                    'detail': 'حدث خطأ في جلب الوجبات',
+                    'trace': traceback.format_exc()
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
