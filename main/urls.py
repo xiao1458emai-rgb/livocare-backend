@@ -144,12 +144,18 @@ base_urls = [
     path('test-simple/', lambda request: JsonResponse({'status': 'ok', 'message': 'Test endpoint works!'}), name='test-simple'),
     path('test-websocket/', test_websocket, name='test-websocket'),
 ]
-
+cron_urls = [
+    path('cron/daily-summary/', cron_daily_summary, name='cron-daily-summary'),
+    path('cron/morning-tip/', cron_morning_tip, name='cron-morning-tip'),
+    path('cron/smart-notifications/', cron_smart_notifications, name='cron-smart-notifications'),
+    path('cron/test/', cron_test_simple, name='cron-test'),
+]
 # =========================================================
 # ✅ دمج جميع المسارات (بدون مسارات مكررة)
 # =========================================================
 urlpatterns = [
     path('', include(router.urls)),
+    *cron_urls,
     *esp32_urls,
     *base_urls,
 ]
