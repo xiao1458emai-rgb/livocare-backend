@@ -1,11 +1,11 @@
-# main/urls.py - النسخة النهائية (بدون دوال الساعة الذكية)
+# main/urls.py - النسخة النهائية المصححة (بدون تضارب في المسارات)
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView 
 from django.http import JsonResponse  
 from main.views import (
-    # ✅ جميع الدوال المستوردة (بدون دوال الساعة الذكية)
+    # ✅ جميع الدوال المستوردة
     scan_barcode, advanced_cross_insights, cross_insights, google_auth,
     trigger_notifications, generate_notifications_now,
     push_subscribe,
@@ -27,7 +27,7 @@ from main.views import (
     search_medication, get_medication_details, get_user_medications,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
-    # ✅ دوال ESP32 فقط
+    # ✅ دوال ESP32
     esp32_update_health_status,
     esp32_get_latest_health_status,
     esp32_get_health_history,
@@ -55,7 +55,7 @@ router.register(r'notifications', views.NotificationViewSet, basename='notificat
 router.register(r'environment-data', views.EnvironmentDataViewSet, basename='environment-data')
 
 # =========================================================
-# ✅ مسارات ESP32 فقط (بدون دوال الساعة الذكية)
+# ✅ مسارات ESP32
 # =========================================================
 esp32_urls = [
     path('esp32/update/', esp32_update_health_status, name='esp32-update'),
@@ -64,11 +64,12 @@ esp32_urls = [
 ]
 
 # =========================================================
-# ✅ المسارات الأساسية (بدون مسارات الساعة الذكية)
+# ✅ المسارات الأساسية
 # =========================================================
 base_urls = [
-        # 🔐 مصادقة Google
+    # 🔐 مصادقة Google
     path('auth/google/', google_auth, name='google_auth'), 
+    
     # 🧠 التحليلات الذكية
     path('advanced-insights/', advanced_cross_insights, name='advanced-insights'),
     path('cross-insights/', cross_insights, name='cross-insights'),
@@ -145,37 +146,11 @@ base_urls = [
 ]
 
 # =========================================================
-# ✅ مسارات الإشعارات المخصصة
-# =========================================================
-notification_custom_urls = [
-    path('notifications/unread-count/', 
-         views.NotificationViewSet.as_view({'get': 'unread_count'}), 
-         name='notification-unread-count'),
-    
-    path('notifications/stats/', 
-         views.NotificationViewSet.as_view({'get': 'stats'}), 
-         name='notification-stats'),
-    
-    path('notifications/recent/', 
-         views.NotificationViewSet.as_view({'get': 'recent'}), 
-         name='notification-recent'),
-    
-    path('notifications/mark-all-read/', 
-         views.NotificationViewSet.as_view({'post': 'mark_all_read'}), 
-         name='notification-mark-all-read'),
-    
-    path('notifications/delete-all-read/', 
-         views.NotificationViewSet.as_view({'delete': 'delete_all_read'}), 
-         name='notification-delete-all-read'),
-]
-
-# =========================================================
-# ✅ دمج جميع المسارات
+# ✅ دمج جميع المسارات (بدون مسارات مكررة)
 # =========================================================
 urlpatterns = [
     path('', include(router.urls)),
-    *notification_custom_urls,
-    *esp32_urls,  # ✅ مسارات ESP32 فقط
+    *esp32_urls,
     *base_urls,
 ]
 
