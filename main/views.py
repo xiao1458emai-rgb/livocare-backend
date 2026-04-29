@@ -104,12 +104,13 @@ def get_translated_response(message_key, is_arabic, **kwargs):
 
 
 def send_push_notification_to_user(user_id, title, body, url='/'):
-    """إرسال إشعار منبثق لمستخدم محدد"""
+    """إرسال إشعار منبثق لمستخدم محدد عبر خدمة الإشعارات"""
     try:
+        # استدعاء خدمة الإشعارات المنفصلة
         response = requests.post(
-            f'https://notification-service-6nzm.onrender.com/notify/{user_id}',
+            f'https://notification-v4jz.onrender.com/notify/{user_id}',
             json={'title': title, 'body': body, 'icon': '/logo192.png', 'url': url},
-            timeout=5
+            timeout=10
         )
         if response.ok:
             print(f"✅ Push sent to user {user_id}: {title}")
@@ -117,7 +118,6 @@ def send_push_notification_to_user(user_id, title, body, url='/'):
             print(f"❌ Push failed for user {user_id}: {response.status_code}")
     except Exception as e:
         print(f"❌ Push error for user {user_id}: {e}")
-
 
 # ==============================================================================
 # 🔐 1. أذونات مخصصة
