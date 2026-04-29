@@ -27,7 +27,7 @@ ALLOWED_HOSTS = [
     '.railway.app',
     'livocare.onrender.com',
     'livocare-frontend.onrender.com',
-    'livocare-production.up.railway.app',  # ✅ أضف هذا السطر
+    'livocare-production.up.railway.app',
     'livocare-backend.onrender.com'
 ]
 
@@ -186,11 +186,31 @@ SIMPLE_JWT = {
 }
 
 # ==============================================================================
-# 🔗 CORS
+# 🔗 CORS - النسخة المصححة
 # ==============================================================================
 
+# ✅ تفعيل CORS لجميع الأصول (للتجربة - يمكنك تقييدها لاحقاً)
+CORS_ALLOW_ALL_ORIGINS = True
+
+# ✅ قائمة الأصول المسموح بها (إذا أردت تعطيل CORS_ALLOW_ALL_ORIGINS)
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://192.168.8.187:8000",
+    "https://livocare-frontend.onrender.com",
+    "https://livocare-production.up.railway.app",
+    "https://camera-service-fag3.onrender.com",
+    "https://google-auth.onrender.com",
+    "https://notification-service-2xej.onrender.com",
+    "https://email-service-zc0r.onrender.com",
+    "https://livocare-backend.onrender.com",
+    "https://notification-v4jz.onrender.com",
+]
+
+# ✅ قائمة الأصول الموثوقة لـ CSRF
 CSRF_TRUSTED_ORIGINS = [
     "https://livocare-frontend.onrender.com",
+    "https://livocare-backend.onrender.com",
     "https://camera-service-fag3.onrender.com",
     "https://google-auth.onrender.com",
     "https://notification-service-2xej.onrender.com",
@@ -200,34 +220,44 @@ CSRF_TRUSTED_ORIGINS = [
     "http://192.168.8.187:8000",
     "https://*.onrender.com",
     "https://*.railway.app",
-    "https://livocare-production.up.railway.app", 
-     "https://livocare-backend.onrender.com" # ✅ أضف هذا السطر
-]
-
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://192.168.8.187:8000",
-    "https://livocare-frontend.onrender.com",
     "https://livocare-production.up.railway.app",
-    "https://livocare-fronend.vercel.app",   # ✅ هذا مفقود!
-    "https://camera-service-fag3.onrender.com",
-    "https://google-auth.onrender.com",
-    "https://notification-service-2xej.onrender.com",
-    "https://email-service-zc0r.onrender.com",
-    "https://livocare-backend.onrender.com"
+    "https://notification-v4jz.onrender.com",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = True
 
-
-
-CORS_ALLOW_METHODS = ['DELETE', 'GET', 'OPTIONS', 'PATCH', 'POST', 'PUT']
-CORS_ALLOW_HEADERS = [
-    'accept', 'accept-encoding', 'authorization', 'content-type',
-    'dnt', 'origin', 'user-agent', 'x-csrftoken', 'x-requested-with',
+# ✅ الطرق المسموحة
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
 ]
+
+# ✅ الهيدرات المسموحة
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'cache-control',
+]
+
+# ✅ إعدادات الـ Proxy للأمان (مهم لـ Render)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+USE_X_FORWARDED_HOST = True
+USE_X_FORWARDED_PORT = True
+
+# ✅ إعدادات الـ Session
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
 
 # ==============================================================================
 # 🌤️ APIs الخارجية
@@ -272,7 +302,7 @@ NOTIFICATION_SETTINGS = {
     'RETRY_DELAY': 60,
 }
 
-# إعدادات التنبيهات الصحية (مرة واحدة فقط)
+# إعدادات التنبيهات الصحية
 HEALTH_ALERTS = {
     'weight': {'min': 50, 'max': 100, 'urgent_min': 40, 'urgent_max': 120},
     'systolic': {'min': 90, 'max': 140, 'urgent_min': 80, 'urgent_max': 160},
@@ -280,7 +310,7 @@ HEALTH_ALERTS = {
     'glucose': {'min': 70, 'max': 140, 'urgent_min': 60, 'urgent_max': 180},
 }
 
-# إعدادات توقيت الإشعارات (مرة واحدة فقط)
+# إعدادات توقيت الإشعارات
 NOTIFICATION_TIMING = {
     'breakfast': {'hour': 8, 'minute': 0},
     'lunch': {'hour': 13, 'minute': 0},
@@ -294,16 +324,17 @@ NOTIFICATION_TIMING = {
 # 🔒 إعدادات الأمان للإنتاج
 # ==============================================================================
 
-# تم تعطيل إعدادات SSL مؤقتاً لتجنب مشكلة إعادة التوجيه
-# if not DEBUG:
-#     SECURE_SSL_REDIRECT = True
-#     SESSION_COOKIE_SECURE = True
-#     CSRF_COOKIE_SECURE = True
-#     SECURE_BROWSER_XSS_FILTER = True
-#     SECURE_CONTENT_TYPE_NOSNIFF = True
-#     SECURE_HSTS_SECONDS = 31536000
-#     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-#     SECURE_HSTS_PRELOAD = True
+# ✅ تفعيل إعدادات SSL في الإنتاج (عندما DEBUG = False)
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
 # ==============================================================================
 # ⏰ Cron Jobs (المهام المجدولة)
 # ==============================================================================
@@ -315,8 +346,3 @@ INSTALLED_APPS += [
 CRONJOBS = [
     ('0 20 * * *', 'django.core.management.call_command', ['generate_daily_notifications']),
 ]
-
-# إذا كنت تريد أيضاً تذكير بالوجبات
-# ('0 8 * * *', 'django.core.management.call_command', ['send_meal_reminder', 'breakfast']),
-# ('0 13 * * *', 'django.core.management.call_command', ['send_meal_reminder', 'lunch']),
-# ('0 19 * * *', 'django.core.management.call_command', ['send_meal_reminder', 'dinner']),
