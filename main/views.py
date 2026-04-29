@@ -1333,7 +1333,7 @@ def trigger_notifications(request):
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_daily_summary(request):
-    """إرسال ملخص اليوم لجميع المستخدمين"""
+    """إرسال ملخص اليوم لجميع المستخدمين مع إشعارات منبثقة"""
     try:
         users = CustomUser.objects.filter(is_active=True)
         today = timezone.now().date()
@@ -1348,23 +1348,26 @@ def cron_daily_summary(request):
             
             message = f"📊 نشاط: {total_minutes} دقيقة | 🍽️ سعرات: {total_calories}"
             
+            # ✅ حفظ في قاعدة البيانات
             Notification.objects.create(
                 user=user, title="🌙 ملخص يومك", message=message,
                 type="summary", priority="medium", action_url="/dashboard", is_read=False
             )
             
+            # ✅ ✅ ✅ إرسال إشعار منبثق (Push Notification)
             send_push_notification_to_user(user.id, "🌙 ملخص يومك", message, "/dashboard")
+            
             total += 1
         
         return Response({'success': True, 'message': f'تم إرسال الملخص إلى {total} مستخدم'})
     except Exception as e:
         return Response({'success': False, 'error': str(e)}, status=500)
-
-
+    
+    
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_morning_tip(request):
-    """إرسال نصيحة صباحية لجميع المستخدمين"""
+    """إرسال نصيحة صباحية لجميع المستخدمين مع إشعارات منبثقة"""
     try:
         users = CustomUser.objects.filter(is_active=True)
         tips = [
@@ -1377,11 +1380,15 @@ def cron_morning_tip(request):
         total = 0
         
         for user in users:
+            # ✅ حفظ في قاعدة البيانات
             Notification.objects.create(
                 user=user, title=tip['title'], message=tip['message'],
                 type="tip", priority="low", action_url="/dashboard", is_read=False
             )
+            
+            # ✅ ✅ ✅ إرسال إشعار منبثق (Push Notification)
             send_push_notification_to_user(user.id, tip['title'], tip['message'], "/dashboard")
+            
             total += 1
         
         return Response({'success': True, 'message': f'تم إرسال النصيحة إلى {total} مستخدم', 'tip': tip})
@@ -1392,7 +1399,7 @@ def cron_morning_tip(request):
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_smart_notifications(request):
-    """إرسال إشعارات ذكية لجميع المستخدمين"""
+    """إرسال إشعارات ذكية لجميع المستخدمين مع إشعارات منبثقة"""
     try:
         users = CustomUser.objects.filter(is_active=True)
         today = timezone.now().date()
@@ -1402,17 +1409,23 @@ def cron_smart_notifications(request):
             created = 0
             
             if Meal.objects.filter(user=user, meal_time__date=today).count() == 0:
+                # ✅ حفظ في قاعدة البيانات
                 Notification.objects.create(
                     user=user, title='🥗 تذكير بالوجبة', message='لم تسجل أي وجبة اليوم!',
                     type='nutrition', priority='medium', action_url='/nutrition', is_read=False
                 )
+                # ✅ ✅ ✅ إرسال إشعار منبثق
+                send_push_notification_to_user(user.id, '🥗 تذكير بالوجبة', 'لم تسجل أي وجبة اليوم!', '/nutrition')
                 created += 1
             
             if PhysicalActivity.objects.filter(user=user, start_time__date=today).count() == 0:
+                # ✅ حفظ في قاعدة البيانات
                 Notification.objects.create(
                     user=user, title='🏃 حان وقت الحركة', message='المشي 30 دقيقة يحسن صحتك.',
                     type='activity', priority='medium', action_url='/activities', is_read=False
                 )
+                # ✅ ✅ ✅ إرسال إشعار منبثق
+                send_push_notification_to_user(user.id, '🏃 حان وقت الحركة', 'لم تمارس أي نشاط بدني اليوم!', '/activities')
                 created += 1
             
             if created > 0:
@@ -1421,8 +1434,6 @@ def cron_smart_notifications(request):
         return Response({'success': True, 'message': f'تم إرسال الإشعارات الذكية إلى {total} مستخدم'})
     except Exception as e:
         return Response({'success': False, 'error': str(e)}, status=500)
-
-
 @api_view(['GET', 'POST'])
 @permission_classes([AllowAny])
 def cron_test_simple(request):
