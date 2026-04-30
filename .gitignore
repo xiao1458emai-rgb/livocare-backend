@@ -6,4 +6,7 @@ staticfiles/
 media/
 node_modules/
 .DS_Store
-*.log
+*.log".env" 
+"env.txt" 
+"*.txt" 
+"bfg.jar" 
