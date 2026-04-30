@@ -346,3 +346,17 @@ INSTALLED_APPS += [
 CRONJOBS = [
     ('0 20 * * *', 'django.core.management.call_command', ['generate_daily_notifications']),
 ]
+# ==============================================================================
+# 🧪 اختبار تحميل المفتاح (يمكن إزالته لاحقاً)
+# ==============================================================================
+
+print("=" * 50)
+print("🔍 SETTINGS DEBUG INFO:")
+print(f"📁 BASE_DIR: {BASE_DIR}")
+print(f"🔑 GROQ_API_KEY loaded: {'✅ YES' if GROQ_API_KEY else '❌ NO'}")
+if GROQ_API_KEY:
+    print(f"🔑 Key starts with: {GROQ_API_KEY[:15]}...")
+    print(f"🔑 Key length: {len(GROQ_API_KEY)}")
+else:
+    print("⚠️ GROQ_API_KEY is empty! Check .env file")
+print("=" * 50)
