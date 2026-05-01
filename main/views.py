@@ -36,7 +36,6 @@ from .serializers import (
 )
 from .services.nutrition_service import NutritionService
 from .services.weather_service import WeatherService
-from .services.exercise_service import AdvancedHealthAnalytics
 from .services.habit_analytics_service import HabitAnalyticsService
 from .services.ai_chat_service import LlamaService
 from .services.sentiment_service import SentimentAnalyzer
