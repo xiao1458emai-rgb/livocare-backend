@@ -35,11 +35,11 @@ from main.views import (
     habit_summary_api,habit_recommendations_api,habit_predictions_api,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
-        # ✅ دوال التحليلات الصحية الجديدة
-    health_dashboard,
+     analyze_sentiment_text,
+ analyze_sentiment_batch,analyze_with_context_api,get_mood_insights_api, quick_sentiment_api,
+    health_dashboard, analyze_chat_message,, public_analyze_sentiment
     get_health_analysis_api,
     refresh_analysis,
-
     # ✅ دوال ESP32
     esp32_update_health_status,
     esp32_get_latest_health_status,
@@ -197,6 +197,32 @@ comprehensive_analytics_urls = [
     # 📊 مقارنة مع الأقران
     path('analytics/compare/', compare_with_peers, name='analytics_compare'),
 ]
+
+# =========================================================
+# ✅ مسارات تحليل المشاعر (Sentiment Analysis)
+# =========================================================
+sentiment_urls = [
+    # تحليل نص واحد
+    path('sentiment/analyze/', analyze_sentiment_text, name='sentiment_analyze'),
+    
+    # تحليل مجموعة نصوص
+    path('sentiment/batch/', analyze_sentiment_batch, name='sentiment_batch'),
+    
+    # تحليل مع سياق (متقدم)
+    path('sentiment/context/', analyze_with_context_api, name='sentiment_context'),
+    
+    # رؤى من سجلات المزاج
+    path('sentiment/mood-insights/', get_mood_insights_api, name='sentiment_mood_insights'),
+    
+    # تحليل سريع (GET)
+    path('sentiment/quick/', quick_sentiment_api, name='sentiment_quick'),
+    
+    # تحليل رسائل الدردشة
+    path('sentiment/chat/', analyze_chat_message, name='sentiment_chat'),
+    
+    # تحليل عام بدون مصادقة
+    path('sentiment/public/', public_analyze_sentiment, name='sentiment_public'),
+]
 # =========================================================
 # ✅ دمج جميع المسارات (بدون مسارات مكررة)
 # =========================================================
@@ -207,6 +233,7 @@ urlpatterns = [
     *health_analytics_urls,
     *comprehensive_analytics_urls,
     *habit_analytics_urls,
+    *sentiment_urls,
     *base_urls,
 ]
 
