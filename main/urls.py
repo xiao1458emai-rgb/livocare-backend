@@ -22,7 +22,14 @@ from main.views import (
     send_morning_tip, send_notifications_to_all_users,
     cron_daily_summary, cron_morning_tip, cron_smart_notifications,
     cron_test_simple,
-    get_weather, search_food, suggest_exercises, analyze_sentiment,
+    get_weather, search_food,analyze_sentiment,
+    comprehensive_health_analytics_view,
+    get_comprehensive_analytics_api,
+    get_analytics_summary,
+    get_recommendations_only,
+    refresh_comprehensive_analytics,
+    export_analytics_report,
+    compare_with_peers,
     get_smart_recommendations,
     search_medication, get_medication_details, get_user_medications,
     add_user_medication, delete_user_medication,
@@ -92,8 +99,7 @@ base_urls = [
     # 🥗 التغذية والبحث عن الطعام
     path('food/search/', search_food, name='food-search'),
     
-    # 💪 التمارين الرياضية
-    path('exercises/suggest/', suggest_exercises, name='exercise-suggest'),
+   
     
     # 😊 تحليل المشاعر
     path('sentiment/analyze/', analyze_sentiment, name='sentiment-analyze'),
@@ -160,6 +166,31 @@ cron_urls = [
     path('cron/test/', cron_test_simple, name='cron-test'),
 ]
 # =========================================================
+# ✅ مسارات التحليلات الشاملة (Comprehensive Analytics)
+# =========================================================
+comprehensive_analytics_urls = [
+    # 📊 الصفحة الرئيسية للتحليلات الشاملة
+    path('analytics/comprehensive/', comprehensive_health_analytics_view, name='comprehensive_analytics'),
+    
+    # 🤖 API التحليلات الشاملة
+    path('analytics/comprehensive/api/', get_comprehensive_analytics_api, name='comprehensive_analytics_api'),
+    
+    # 📋 ملخص سريع
+    path('analytics/summary/', get_analytics_summary, name='analytics_summary'),
+    
+    # 💡 التوصيات فقط
+    path('analytics/recommendations/', get_recommendations_only, name='analytics_recommendations'),
+    
+    # 🔄 تحديث التحليلات
+    path('analytics/refresh/', refresh_comprehensive_analytics, name='analytics_refresh'),
+    
+    # 📥 تصدير التقرير
+    path('analytics/export/', export_analytics_report, name='analytics_export'),
+    
+    # 📊 مقارنة مع الأقران
+    path('analytics/compare/', compare_with_peers, name='analytics_compare'),
+]
+# =========================================================
 # ✅ دمج جميع المسارات (بدون مسارات مكررة)
 # =========================================================
 urlpatterns = [
@@ -167,6 +198,7 @@ urlpatterns = [
     *cron_urls,
     *esp32_urls,
     *health_analytics_urls,
+    *comprehensive_analytics_urls,
     *base_urls,
 ]
 

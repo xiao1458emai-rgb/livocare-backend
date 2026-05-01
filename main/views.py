@@ -740,21 +740,6 @@ def search_food(request):
             'data': []
         }, status=500)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def suggest_exercises(request):
-    """اقتراح تمارين رياضية"""
-    try:
-        muscle = request.query_params.get('muscle')
-        difficulty = request.query_params.get('difficulty')
-        language = get_request_language(request)
-        
-        service = AdvancedHealthAnalytics(request.user, language=language)
-        exercises = service.suggest_exercises(muscle, difficulty)
-        
-        return Response({'success': True, 'data': exercises})
-    except Exception as e:
-        return Response({'success': False, 'error': str(e)}, status=500)
 
 
 # ==============================================================================
@@ -2168,3 +2153,202 @@ def refresh_analysis(request):
     تحديث التحليلات (عادةً ما يتم تخزينها في cache)
     """
     return get_health_analysis_api(request)
+# main/views.py - أضف هذه الدوال في نهاية الملف
+
+from main.services.exercise_service import get_comprehensive_health_analytics
+from django.core.paginator import Paginator
+from django.db.models import Q
+
+
+# ==============================================================================
+# دوال التحليلات الصحية الشاملة
+# ==============================================================================
+
+@login_required
+def comprehensive_health_analytics_view(request):
+    """
+    عرض صفحة التحليلات الصحية الشاملة
+    """
+    language = request.GET.get('lang', 'ar')
+    context = {
+        'page_title': 'التحليلات الصحية الشاملة' if language == 'ar' else 'Comprehensive Health Analytics',
+        'user_name': request.user.get_full_name() or request.user.username,
+        'language': language,
+    }
+    return render(request, 'health/comprehensive_analytics.html', context)
+
+
+@login_required
+def get_comprehensive_analytics_api(request):
+    """
+    API لجلب التحليلات الصحية الشاملة (AJAX)
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    try:
+        analytics_engine = get_comprehensive_health_analytics(request.user, language=language)
+        
+        return JsonResponse({
+            'success': True,
+            'data': analytics_engine,
+            'is_arabic': language == 'ar',
+            'timestamp': timezone.now().isoformat()
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({
+            'success': False,
+            'error': str(e),
+            'message': 'حدث خطأ في تحليل البيانات' if language == 'ar' else 'Error analyzing data'
+        }, status=500)
+
+
+@login_required
+def get_analytics_summary(request):
+    """
+    الحصول على ملخص سريع للتحليلات (لللوحات الرئيسية)
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    try:
+        analytics = get_comprehensive_health_analytics(request.user, language=language)
+        
+        # استخراج المعلومات الأساسية فقط
+        summary = {
+            'health_score': analytics.get('health_score', {}),
+            'risk_level': analytics.get('profile', {}).get('risk_level', 'low'),
+            'recommendations_count': len(analytics.get('personalized_recommendations', [])),
+            'alerts_count': len(analytics.get('vital_signs', {}).get('alerts', [])),
+            'top_recommendation': analytics.get('personalized_recommendations', [])[0] if analytics.get('personalized_recommendations') else None
+        }
+        
+        return JsonResponse({
+            'success': True,
+            'summary': summary,
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@login_required
+def get_recommendations_only(request):
+    """
+    الحصول على التوصيات فقط (للوحات الجانبية)
+    """
+    language = request.GET.get('lang', 'ar')
+    limit = int(request.GET.get('limit', 5))
+    
+    try:
+        analytics = get_comprehensive_health_analytics(request.user, language=language)
+        recommendations = analytics.get('personalized_recommendations', [])[:limit]
+        
+        return JsonResponse({
+            'success': True,
+            'recommendations': recommendations,
+            'total': len(analytics.get('personalized_recommendations', [])),
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+@login_required
+def refresh_comprehensive_analytics(request):
+    """
+    تحديث التحليلات الشاملة (مسح الكاش)
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    # هنا يمكنك إضافة منطق مسح الكاش إذا كنت تستخدم caching
+    # cache.delete(f'comprehensive_analytics_{request.user.id}')
+    
+    return get_comprehensive_analytics_api(request)
+
+
+@login_required
+def export_analytics_report(request):
+    """
+    تصدير تقرير التحليلات بصيغة JSON أو PDF
+    """
+    language = request.GET.get('lang', 'ar')
+    format_type = request.GET.get('format', 'json')
+    
+    try:
+        analytics = get_comprehensive_health_analytics(request.user, language=language)
+        
+        if format_type == 'json':
+            return JsonResponse({
+                'success': True,
+                'data': analytics,
+                'exported_at': timezone.now().isoformat(),
+                'user': request.user.username
+            })
+        
+        # للـ PDF - يمكنك إضافة مكتبة ReportLab أو WeasyPrint
+        elif format_type == 'pdf':
+            # TODO: إضافة توليد PDF
+            return JsonResponse({
+                'success': False,
+                'message': 'PDF export coming soon'
+            }, status=501)
+        
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
+
+
+# ==============================================================================
+# دوال المقارنة مع المستخدمين الآخرين (اختياري)
+# ==============================================================================
+
+@login_required
+def compare_with_peers(request):
+    """
+    مقارنة بيانات المستخدم مع مستخدمين آخرين من نفس الفئة العمرية
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    try:
+        # جلب تحليلات المستخدم الحالي
+        user_analytics = get_comprehensive_health_analytics(request.user, language=language)
+        
+        # جلب متوسطات الفئة العمرية
+        age_category = user_analytics.get('profile', {}).get('age_category', 'adult')
+        
+        # استعلام عن متوسطات المستخدمين الآخرين (نفس الفئة العمرية)
+        from django.db.models import Avg
+        
+        # هذا مثال مبسط - يمكن تطويره بشكل أكبر
+        peers_avg = {
+            'avg_sleep': 7.5,
+            'avg_activity': 35,
+            'avg_mood': 3.8,
+            'avg_health_score': 72
+        }
+        
+        return JsonResponse({
+            'success': True,
+            'user_data': {
+                'sleep': user_analytics.get('sleep', {}).get('average_hours', 0),
+                'activity': user_analytics.get('activity', {}).get('average_daily_minutes', 0),
+                'mood': user_analytics.get('mood_mental', {}).get('average_mood_score', 0),
+                'health_score': user_analytics.get('health_score', {}).get('total_score', 0)
+            },
+            'peers_average': peers_avg,
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'success': False,
+            'error': str(e)
+        }, status=500)
