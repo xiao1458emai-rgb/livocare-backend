@@ -2504,3 +2504,335 @@ def get_habit_medication_analytics(user, language='ar'):
     """دالة مساعدة للحصول على تحليلات العادات والأدوية"""
     service = HabitMedicationAnalyticsService(user, language=language)
     return service.get_complete_analysis()
+# main/views.py - أضف هذه الدوال
+
+from main.services.sentiment_service import (
+    SentimentAnalyzer, 
+    AdvancedSentimentAnalyzer, 
+    SentimentTracker,
+    quick_analyze,
+    analyze_with_context,
+    get_sentiment_insights
+)
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework import status
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from django.views import View
+import json
+
+
+# ==============================================================================
+# دوال تحليل المشاعر (Sentiment Analysis)
+# ==============================================================================
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def analyze_sentiment_text(request):
+    """
+    تحليل مشاعر نص معين
+    
+    POST /api/sentiment/analyze/
+    Body: {"text": "النص المراد تحليله", "advanced": false}
+    """
+    try:
+        data = request.data
+        text = data.get('text', '').strip()
+        advanced = data.get('advanced', False)
+        language = request.GET.get('lang', 'ar')
+        
+        if not text:
+            return Response({
+                'success': False,
+                'error': 'الرجاء إدخال نص للتحليل',
+                'message': 'Please provide text to analyze'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if len(text) < 3:
+            return Response({
+                'success': False,
+                'error': 'النص قصير جداً للتحليل',
+                'message': 'Text is too short for analysis'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if advanced:
+            analyzer = AdvancedSentimentAnalyzer(language=language)
+            result = analyzer.analyze_with_context(text, context="")
+        else:
+            analyzer = SentimentAnalyzer(language=language)
+            result = analyzer.get_detailed_analysis(text)
+        
+        return Response({
+            'success': True,
+            'data': result,
+            'language': language
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': 'حدث خطأ في تحليل المشاعر' if language == 'ar' else 'Error analyzing sentiment'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def analyze_sentiment_batch(request):
+    """
+    تحليل مشاعر مجموعة من النصوص
+    
+    POST /api/sentiment/batch/
+    Body: {"texts": ["نص1", "نص2", "نص3"]}
+    """
+    try:
+        data = request.data
+        texts = data.get('texts', [])
+        language = request.GET.get('lang', 'ar')
+        
+        if not texts or not isinstance(texts, list):
+            return Response({
+                'success': False,
+                'error': 'الرجاء إدخال مجموعة من النصوص',
+                'message': 'Please provide a list of texts'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        tracker = SentimentTracker(language=language)
+        results = tracker.analyze_batch(texts)
+        overall = tracker.get_overall_sentiment(results)
+        
+        return Response({
+            'success': True,
+            'data': {
+                'results': results,
+                'overall': overall,
+                'total_analyzed': len(results)
+            },
+            'language': language
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def analyze_with_context_api(request):
+    """
+    تحليل المشاعر مع سياق إضافي (نسخة متقدمة)
+    
+    POST /api/sentiment/context/
+    Body: {"text": "النص", "context": "السياق الإضافي"}
+    """
+    try:
+        data = request.data
+        text = data.get('text', '').strip()
+        context = data.get('context', '')
+        language = request.GET.get('lang', 'ar')
+        
+        if not text:
+            return Response({
+                'success': False,
+                'error': 'الرجاء إدخال نص للتحليل'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        analyzer = AdvancedSentimentAnalyzer(language=language)
+        result = analyzer.analyze_with_context(text, context)
+        
+        return Response({
+            'success': True,
+            'data': result,
+            'language': language
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_mood_insights_api(request):
+    """
+    الحصول على رؤى وتحليلات من سجلات المزاج
+    
+    GET /api/sentiment/mood-insights/
+    """
+    try:
+        language = request.GET.get('lang', 'ar')
+        
+        # جلب سجلات المزاج من قاعدة البيانات
+        from main.models import MoodEntry
+        
+        mood_entries = MoodEntry.objects.filter(user=request.user).order_by('-entry_time')[:30]
+        
+        mood_data = []
+        for entry in mood_entries:
+            mood_data.append({
+                'mood': entry.mood,
+                'text_entry': entry.text_entry or '',
+                'entry_time': entry.entry_time.isoformat(),
+                'factors': entry.factors or ''
+            })
+        
+        if not mood_data:
+            return Response({
+                'success': True,
+                'data': {
+                    'has_data': False,
+                    'message': 'لا توجد سجلات مزاج كافية للتحليل' if language == 'ar' else 'Insufficient mood records for analysis'
+                }
+            })
+        
+        insights = get_sentiment_insights(mood_data, language=language)
+        
+        return Response({
+            'success': True,
+            'data': insights,
+            'language': language
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def quick_sentiment_api(request):
+    """
+    تحليل سريع للمشاعر (GET request مع query param)
+    
+    GET /api/sentiment/quick/?text=النص
+    """
+    try:
+        text = request.GET.get('text', '').strip()
+        language = request.GET.get('lang', 'ar')
+        
+        if not text:
+            return Response({
+                'success': False,
+                'error': 'الرجاء إدخال نص للتحليل',
+                'message': 'Please provide text to analyze'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        result = quick_analyze(text, language=language)
+        
+        return Response({
+            'success': True,
+            'data': result,
+            'language': language
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def analyze_chat_message(request):
+    """
+    تحليل مشاعر رسالة دردشة (للتكامل مع روبوت الدردشة)
+    
+    POST /api/sentiment/chat/
+    Body: {"message": "نص الرسالة"}
+    """
+    try:
+        data = request.data
+        message = data.get('message', '').strip()
+        language = request.GET.get('lang', 'ar')
+        
+        if not message:
+            return Response({
+                'success': False,
+                'error': 'الرجاء إدخال نص الرسالة'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        analyzer = SentimentAnalyzer(language=language)
+        sentiment = analyzer.analyze(message)
+        
+        # توليد ردود مخصصة بناءً على المشاعر
+        responses = {
+            'POSITIVE': {
+                'ar': '😊 سعدت بمشاعرك الإيجابية! كيف يمكنني مساعدتك اليوم؟',
+                'en': '😊 Glad to hear your positive feelings! How can I help you today?'
+            },
+            'NEGATIVE': {
+                'ar': '😔 أتفهم أنك تشعر بذلك. تذكر أنني هنا لدعمك. هل تريد التحدث عن شيء محدد؟',
+                'en': '😔 I understand you feel that way. Remember I\'m here to support you. Want to talk about something specific?'
+            },
+            'NEUTRAL': {
+                'ar': '👋 كيف يمكنني مساعدتك اليوم؟',
+                'en': '👋 How can I help you today?'
+            }
+        }
+        
+        response_text = responses.get(sentiment['label'], responses['NEUTRAL'])[
+            'ar' if language == 'ar' else 'en'
+        ]
+        
+        return Response({
+            'success': True,
+            'data': {
+                'sentiment': sentiment,
+                'bot_response': response_text,
+                'original_message': message
+            },
+            'language': language
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==============================================================================
+# دوال تحليل المشاعر للمستخدمين غير المسجلين (Public)
+# ==============================================================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def public_analyze_sentiment(request):
+    """
+    تحليل مشاعر نص (بدون مصادقة - للاستخدام العام)
+    
+    POST /api/sentiment/public/
+    Body: {"text": "النص"}
+    """
+    try:
+        data = request.data
+        text = data.get('text', '').strip()
+        language = request.headers.get('Accept-Language', 'ar')[:2]
+        
+        if not text:
+            return Response({
+                'success': False,
+                'error': 'الرجاء إدخال نص للتحليل'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        result = quick_analyze(text, language=language)
+        
+        return Response({
+            'success': True,
+            'data': result
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
