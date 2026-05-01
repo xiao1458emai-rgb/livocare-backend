@@ -2339,3 +2339,169 @@ def compare_with_peers(request):
             'success': False,
             'error': str(e)
         }, status=500)
+"""
+خدمة تحليلات العادات والأدوية المتقدمة
+Advanced Habits & Medications Analytics Service using scikit-learn
+"""
+
+import numpy as np
+import pandas as pd
+from datetime import timedelta, datetime
+from django.utils import timezone
+from django.db.models import Avg, Sum, Count, Q, F
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier, IsolationForest
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+import warnings
+warnings.filterwarnings('ignore')
+
+from .models import (
+    HabitDefinition, HabitLog, Medication, UserMedication,
+    Sleep, MoodEntry, PhysicalActivity, HealthStatus
+)
+
+# ==============================================================================
+# استيرادات DRF لدوال API
+# ==============================================================================
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+
+
+class HabitMedicationAnalyticsService:
+    """
+    خدمة متخصصة لتحليلات العادات والأدوية باستخدام التعلم الآلي
+    تقدم توصيات مخصصة بناءً على سلوك المستخدم والتزامه
+    """
+    
+    def __init__(self, user, language='ar'):
+        self.user = user
+        self.language = language
+        self.is_arabic = language.startswith('ar')
+        self.today = timezone.now()
+        self.today_date = self.today.date()
+        self.week_ago = self.today - timedelta(days=7)
+        self.month_ago = self.today - timedelta(days=30)
+        self.three_months_ago = self.today - timedelta(days=90)
+        
+        # نماذج ML
+        self._models = {}
+        self._scaler = StandardScaler()
+        
+    # ... كل دوال class HabitMedicationAnalyticsService هنا ...
+    # (get_summary, get_correlations, get_recommendations, get_predictions, ...)
+    # ... إلى أن تصل إلى نهاية class ...
+
+
+# ==============================================================================
+# ==============================================================================
+# دوال API باستخدام DRF (مع مصادقة صحيحة) - ✅ هذا هو التعريف الصحيح والوحيد
+# ==============================================================================
+# ==============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def habit_medication_analytics_api(request):
+    """
+    API للحصول على تحليلات العادات والأدوية
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    try:
+        service = HabitMedicationAnalyticsService(request.user, language=language)
+        result = service.get_complete_analysis()
+        return Response({
+            'success': True,
+            'data': result,
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': 'حدث خطأ في تحليل العادات' if language == 'ar' else 'Error analyzing habits'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def habit_summary_api(request):
+    """
+    API للحصول على ملخص سريع للعادات (للوحات الرئيسية)
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    try:
+        service = HabitMedicationAnalyticsService(request.user, language=language)
+        summary = service.get_summary()
+        return Response({
+            'success': True,
+            'summary': summary,
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def habit_recommendations_api(request):
+    """
+    API للحصول على توصيات العادات فقط
+    """
+    language = request.GET.get('lang', 'ar')
+    limit = int(request.GET.get('limit', 5))
+    
+    try:
+        service = HabitMedicationAnalyticsService(request.user, language=language)
+        recommendations = service.get_recommendations()
+        return Response({
+            'success': True,
+            'recommendations': recommendations[:limit],
+            'total': len(recommendations),
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def habit_predictions_api(request):
+    """
+    API للحصول على توقعات العادات
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    try:
+        service = HabitMedicationAnalyticsService(request.user, language=language)
+        summary = service.get_summary()
+        predictions = service.get_predictions(summary)
+        return Response({
+            'success': True,
+            'predictions': predictions,
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ==============================================================================
+# دالة مساعدة للاستخدام السريع
+# ==============================================================================
+
+def get_habit_medication_analytics(user, language='ar'):
+    """دالة مساعدة للحصول على تحليلات العادات والأدوية"""
+    service = HabitMedicationAnalyticsService(user, language=language)
+    return service.get_complete_analysis()

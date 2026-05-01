@@ -31,7 +31,8 @@ from main.views import (
     export_analytics_report,
     compare_with_peers,
     get_smart_recommendations,
-    search_medication, get_medication_details, get_user_medications,
+    search_medication, get_medication_details, get_user_medications,habit_medication_analytics_api,
+    habit_summary_api,habit_recommendations_api,habit_predictions_api,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
         # ✅ دوال التحليلات الصحية الجديدة
@@ -165,6 +166,12 @@ cron_urls = [
     path('cron/smart-notifications/', cron_smart_notifications, name='cron-smart-notifications'),
     path('cron/test/', cron_test_simple, name='cron-test'),
 ]
+habit_analytics_urls = [
+    path('habits/analytics/', habit_medication_analytics_api, name='habit_analytics'),
+    path('habits/summary/', habit_summary_api, name='habit_summary'),
+    path('habits/recommendations/', habit_recommendations_api, name='habit_recommendations'),
+    path('habits/predictions/', habit_predictions_api, name='habit_predictions'),
+]
 # =========================================================
 # ✅ مسارات التحليلات الشاملة (Comprehensive Analytics)
 # =========================================================
@@ -199,6 +206,7 @@ urlpatterns = [
     *esp32_urls,
     *health_analytics_urls,
     *comprehensive_analytics_urls,
+    *habit_analytics_urls,
     *base_urls,
 ]
 
