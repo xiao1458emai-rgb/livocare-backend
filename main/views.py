@@ -2177,31 +2177,43 @@ def comprehensive_health_analytics_view(request):
     return render(request, 'health/comprehensive_analytics.html', context)
 
 
-@login_required
+# مثال للدالة get_comprehensive_analytics_api
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_comprehensive_analytics_api(request):
-    """
-    API لجلب التحليلات الصحية الشاملة (AJAX)
-    """
     language = request.GET.get('lang', 'ar')
-    
     try:
         analytics_engine = get_comprehensive_health_analytics(request.user, language=language)
-        
-        return JsonResponse({
+        return Response({
             'success': True,
             'data': analytics_engine,
-            'is_arabic': language == 'ar',
-            'timestamp': timezone.now().isoformat()
+            'is_arabic': language == 'ar'
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return JsonResponse({
+        return Response({
             'success': False,
-            'error': str(e),
-            'message': 'حدث خطأ في تحليل البيانات' if language == 'ar' else 'Error analyzing data'
-        }, status=500)
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# مثال لدالة get_recommendations_only
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_recommendations_only(request):
+    language = request.GET.get('lang', 'ar')
+    limit = int(request.GET.get('limit', 5))
+    try:
+        analytics = get_comprehensive_health_analytics(request.user, language=language)
+        recommendations = analytics.get('personalized_recommendations', [])[:limit]
+        return Response({
+            'success': True,
+            'recommendations': recommendations,
+            'total': len(analytics.get('personalized_recommendations', []))
+        })
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @login_required
 def get_analytics_summary(request):
@@ -2233,30 +2245,6 @@ def get_analytics_summary(request):
             'error': str(e)
         }, status=500)
 
-
-@login_required
-def get_recommendations_only(request):
-    """
-    الحصول على التوصيات فقط (للوحات الجانبية)
-    """
-    language = request.GET.get('lang', 'ar')
-    limit = int(request.GET.get('limit', 5))
-    
-    try:
-        analytics = get_comprehensive_health_analytics(request.user, language=language)
-        recommendations = analytics.get('personalized_recommendations', [])[:limit]
-        
-        return JsonResponse({
-            'success': True,
-            'recommendations': recommendations,
-            'total': len(analytics.get('personalized_recommendations', [])),
-            'is_arabic': language == 'ar'
-        })
-    except Exception as e:
-        return JsonResponse({
-            'success': False,
-            'error': str(e)
-        }, status=500)
 
 
 @login_required
