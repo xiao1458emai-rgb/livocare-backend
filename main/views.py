@@ -2109,3 +2109,57 @@ def refresh_analysis(request):
     """
     # يمكنك إضافة منطق التخزين المؤقت هنا
     return get_health_analysis_api(request)
+## views.py - النسخة الصحيحة
+
+from django.shortcuts import render
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+
+# ✅ استيراد الدالة من الخدمة (وليس الـ class مباشرة)
+from main.services.cross_insights_service import get_health_insights
+
+import json
+
+@login_required
+def health_dashboard(request):
+    """
+    عرض لوحة التحكم الصحية
+    """
+    context = {
+        'page_title': 'لوحة التحليل الصحي الذكي',
+        'user_name': request.user.get_full_name() or request.user.username,
+    }
+    return render(request, 'health/dashboard.html', context)
+
+
+@login_required
+def get_health_analysis_api(request):
+    """
+    API لجلب التحليلات الصحية (AJAX)
+    """
+    language = request.GET.get('lang', 'ar')
+    
+    # ✅ استدعاء الدالة من الخدمة
+    result = get_health_insights(request.user, language=language)
+    
+    if result.get('success'):
+        return JsonResponse({
+            'success': True,
+            'data': result.get('data'),
+            'is_arabic': language == 'ar'
+        })
+    else:
+        return JsonResponse({
+            'success': False,
+            'error': result.get('error', 'حدث خطأ في التحليل'),
+            'message': result.get('message', '')
+        }, status=500)
+
+
+@login_required
+def refresh_analysis(request):
+    """
+    تحديث التحليلات (عادةً ما يتم تخزينها في cache)
+    """
+    return get_health_analysis_api(request)
