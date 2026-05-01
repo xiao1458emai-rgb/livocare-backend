@@ -84,7 +84,7 @@ health_analytics_urls = [
 # ✅ المسارات الأساسية
 # =========================================================
 base_urls = [
- 
+   
     
     # 🌤️ الطقس
     path('weather/', get_weather, name='weather'),
@@ -166,6 +166,7 @@ urlpatterns = [
     path('', include(router.urls)),
     *cron_urls,
     *esp32_urls,
+    *health_analytics_urls,
     *base_urls,
 ]
 
