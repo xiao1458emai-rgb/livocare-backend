@@ -2132,29 +2132,34 @@ def health_dashboard(request):
     }
     return render(request, 'health/dashboard.html', context)
 
+# main/views.py
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+from main.services.cross_insights_service import get_health_insights
 
-@login_required
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_health_analysis_api(request):
     """
     API لجلب التحليلات الصحية (AJAX)
     """
     language = request.GET.get('lang', 'ar')
-    
-    # ✅ استدعاء الدالة من الخدمة
     result = get_health_insights(request.user, language=language)
     
     if result.get('success'):
-        return JsonResponse({
+        return Response({
             'success': True,
             'data': result.get('data'),
             'is_arabic': language == 'ar'
         })
     else:
-        return JsonResponse({
+        return Response({
             'success': False,
             'error': result.get('error', 'حدث خطأ في التحليل'),
             'message': result.get('message', '')
-        }, status=500)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @login_required
