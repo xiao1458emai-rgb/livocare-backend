@@ -1,22 +1,30 @@
 """
-محرك الذكاء الاصطناعي للتحليلات الصحية المتقاطعة - النسخة المتطورة
-Advanced Cross-Data Analysis Engine with Deep Health Analytics
+محرك الذكاء الاصطناعي للتحليلات الصحية المتقاطعة - النسخة المتطورة مع scikit-learn
+يتضمن تحليل شامل لـ CustomUser + HealthStatus + PhysicalActivity
 """
+
 from datetime import timedelta, datetime
 from django.utils import timezone
 from django.db.models import Avg, Sum, Count, Q, F, Min, Max
-from django.db.models.functions import TruncDate, ExtractDay, ExtractWeek
+from django.conf import settings
 from main.models import (
     HealthStatus, PhysicalActivity, Sleep, 
     MoodEntry, Meal, HabitLog, CustomUser
 )
-import math
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier, IsolationForest
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
+from sklearn.neighbors import NearestNeighbors
+import warnings
+warnings.filterwarnings('ignore')
 
-
-class HealthInsightsEngine:
+class HealthInsightsEngineML:
     """
-    محرك متقدم لتحليل البيانات الصحية وإيجاد العلاقات الخفية
-    Advanced engine for analyzing health data with deep personalization
+    محرك متقدم لتحليل البيانات الصحية باستخدام خوارزميات التعلم الآلي
+    يشمل تحليل بيانات المستخدم الشخصية (CustomUser) + العلامات الحيوية + الأنشطة
     """
     
     def __init__(self, user, language='ar'):
@@ -28,137 +36,158 @@ class HealthInsightsEngine:
         self.three_months_ago = self.today - timedelta(days=90)
         self.is_arabic = language == 'ar'
         
-        # ✅ جلب البيانات الشخصية للمستخدم
-        self.user_profile = self._get_user_profile()
-        self.user_age = self._calculate_age()
-        self.user_bmi = None
-        self.user_body_fat = None
+        # ✅ جلب جميع بيانات المستخدم من CustomUser
+        self._load_user_profile_data()
         
-    def _get_user_profile(self):
-        """جلب الملف الشخصي للمستخدم مع جميع البيانات"""
+        # تخزين البيانات للتحليل
+        self._health_data = None
+        self._activity_data = None
+        self._sleep_data = None
+        self._mood_data = None
+        self._meal_data = None
+        
+        # النماذج المدربة
+        self._models = {}
+        
+    def _load_user_profile_data(self):
+        """تحميل وتحليل جميع بيانات المستخدم من CustomUser"""
+        
+        # ✅ البيانات الأساسية
+        self.user_age = None
+        self.user_gender = self.user.gender if hasattr(self.user, 'gender') else None
+        self.user_height = None
+        self.user_initial_weight = None
+        self.user_health_goal = self.user.health_goal if hasattr(self.user, 'health_goal') else None
+        self.user_activity_level = self.user.activity_level if hasattr(self.user, 'activity_level') else None
+        self.user_occupation = self.user.occupation_status if hasattr(self.user, 'occupation_status') else None
+        
+        # حساب العمر من تاريخ الميلاد
         try:
-            if hasattr(self.user, 'profile'):
-                return self.user.profile
-            return None
-        except:
-            return None
-    
-    def _calculate_age(self):
-        """حساب العمر من تاريخ الميلاد"""
-        try:
-            if self.user_profile and self.user_profile.birth_date:
+            if hasattr(self.user, 'date_of_birth') and self.user.date_of_birth:
                 today = timezone.now().date()
-                return today.year - self.user_profile.birth_date.year - (
-                    (today.month, today.day) < (self.user_profile.birth_date.month, self.user_profile.birth_date.day)
+                self.user_age = today.year - self.user.date_of_birth.year - (
+                    (today.month, today.day) < (self.user.date_of_birth.month, self.user.date_of_birth.day)
                 )
         except:
             pass
-        return None
-    
-    def _calculate_bmi(self, weight_kg, height_cm):
-        """حساب مؤشر كتلة الجسم BMI"""
-        if weight_kg and height_cm and height_cm > 0:
-            height_m = height_cm / 100
-            return round(weight_kg / (height_m ** 2), 1)
-        return None
-    
-    def _calculate_body_fat_percentage(self, bmi, age, gender):
-        """تقدير نسبة الدهون في الجسم"""
-        if not bmi or not age:
-            return None
         
-        # صيغة تقريبية لنسبة الدهون
-        if gender == 'male':
-            body_fat = (1.20 * bmi) + (0.23 * age) - 16.2
-        elif gender == 'female':
-            body_fat = (1.20 * bmi) + (0.23 * age) - 5.4
+        # الطول والوزن الأولي
+        if hasattr(self.user, 'height') and self.user.height:
+            self.user_height = float(self.user.height)
+        
+        if hasattr(self.user, 'initial_weight') and self.user.initial_weight:
+            self.user_initial_weight = float(self.user.initial_weight)
+        
+        # ✅ حساب مؤشرات إضافية
+        self.user_bmi = None
+        if self.user_height and self.user_initial_weight:
+            height_m = self.user_height / 100
+            self.user_bmi = round(self.user_initial_weight / (height_m ** 2), 1)
+        
+        # ✅ تحديد الفئة العمرية
+        self.age_category = self._get_age_category()
+        
+        # ✅ حساب معامل النشاط الأساسي
+        self.base_activity_multiplier = self._get_base_activity_multiplier()
+        
+        # ✅ تحديد الهدف الصحي
+        self.health_goal_text = self._get_health_goal_text()
+        
+        # ✅ مستوى الخطر حسب العمر والجنس
+        self.risk_factors = self._calculate_risk_factors()
+    
+    def _get_age_category(self):
+        """تحديد الفئة العمرية للمستخدم"""
+        if not self.user_age:
+            return 'unknown'
+        if self.user_age < 18:
+            return 'adolescent'
+        elif self.user_age < 30:
+            return 'young_adult'
+        elif self.user_age < 50:
+            return 'adult'
+        elif self.user_age < 70:
+            return 'senior'
         else:
-            body_fat = (1.20 * bmi) + (0.23 * age) - 10.8
-        
-        return round(max(5, min(50, body_fat)), 1)
+            return 'elderly'
     
-    def _calculate_bmr_precise(self, weight_kg, height_cm, age, gender):
-        """حساب معدل الأيض الأساسي BMR باستخدام صيغة Mifflin-St Jeor"""
-        if not all([weight_kg, height_cm, age, gender]):
-            return None
-        
-        if gender == 'male':
-            bmr = (10 * weight_kg) + (6.25 * height_cm) - (5 * age) + 5
-        elif gender == 'female':
-            bmr = (10 * weight_kg) + (6.25 * height_cm) - (5 * age) - 161
-        else:
-            # متوسط للجنسين
-            bmr = (10 * weight_kg) + (6.25 * height_cm) - (5 * age) - 78
-        
-        return round(bmr)
-    
-    def _get_activity_multiplier(self, activity_level):
-        """معامل النشاط لحساب السعرات اليومية"""
+    def _get_base_activity_multiplier(self):
+        """معامل النشاط الأساسي حسب مستوى النشاط المختار"""
         multipliers = {
-            'sedentary': 1.2,      # قليل الحركة
-            'light': 1.375,        # نشاط خفيف
-            'moderate': 1.55,      # نشاط متوسط
-            'active': 1.725,       # نشاط عالي
-            'very_active': 1.9,    # نشاط شديد
+            'low': 1.2,
+            'medium': 1.375,
+            'high': 1.55
         }
-        return multipliers.get(activity_level, 1.375)
+        return multipliers.get(self.user_activity_level, 1.375)
     
-    def _get_bmi_category(self, bmi):
-        """تصنيف BMI مع التوصيات"""
-        if bmi < 18.5:
-            return {
-                'category': 'نقص الوزن' if self.is_arabic else 'Underweight',
-                'severity': 'warning',
-                'color': 'orange',
-                'recommendation_ar': 'تحتاج لزيادة السعرات الحرارية مع التركيز على البروتين والدهون الصحية',
-                'recommendation_en': 'Need to increase calories with focus on protein and healthy fats',
-                'risk_level': 'moderate'
-            }
-        elif 18.5 <= bmi < 25:
-            return {
-                'category': 'وزن طبيعي' if self.is_arabic else 'Normal weight',
-                'severity': 'good',
-                'color': 'green',
-                'recommendation_ar': 'حافظ على وزنك الصحي واستمر في نمط الحياة المتوازن',
-                'recommendation_en': 'Maintain your healthy weight and continue balanced lifestyle',
-                'risk_level': 'low'
-            }
-        elif 25 <= bmi < 30:
-            return {
-                'category': 'زيادة وزن' if self.is_arabic else 'Overweight',
-                'severity': 'warning',
-                'color': 'orange',
-                'recommendation_ar': 'انصح بتقليل السعرات الحرارية وزيادة النشاط البدني',
-                'recommendation_en': 'Recommend reducing calories and increasing physical activity',
-                'risk_level': 'moderate'
-            }
-        elif 30 <= bmi < 35:
-            return {
-                'category': 'سمنة درجة أولى' if self.is_arabic else 'Obesity Class I',
-                'severity': 'high',
-                'color': 'red',
-                'recommendation_ar': 'يُنصح بمراجعة أخصائي تغذية وبرنامج رياضي مكثف',
-                'recommendation_en': 'Consult a nutritionist and follow an intensive exercise program',
-                'risk_level': 'high'
-            }
-        elif 35 <= bmi < 40:
-            return {
-                'category': 'سمنة درجة ثانية' if self.is_arabic else 'Obesity Class II',
-                'severity': 'critical',
-                'color': 'darkred',
-                'recommendation_ar': 'حالة صحية تتطلب تدخلاً طبياً عاجلاً ونظاماً صارماً',
-                'recommendation_en': 'Health condition requiring urgent medical intervention',
-                'risk_level': 'critical'
-            }
-        else:
-            return {
-                'category': 'سمنة مفرطة' if self.is_arabic else 'Extreme Obesity',
-                'severity': 'critical',
-                'color': 'darkred',
-                'recommendation_ar': 'حالة خطيرة جداً، استشارة طبية فورية ضرورية',
-                'recommendation_en': 'Extremely serious, immediate medical consultation required',
-                'risk_level': 'critical'
-            }
+    def _get_health_goal_text(self):
+        """نص الهدف الصحي باللغتين"""
+        goals = {
+            'loss': {'ar': 'خسارة الوزن', 'en': 'Weight Loss'},
+            'gain': {'ar': 'زيادة الوزن', 'en': 'Weight Gain'},
+            'maintain': {'ar': 'تثبيت الوزن', 'en': 'Weight Maintenance'}
+        }
+        goal = goals.get(self.user_health_goal, {'ar': 'غير محدد', 'en': 'Not specified'})
+        return goal['ar'] if self.is_arabic else goal['en']
+    
+    def _calculate_risk_factors(self):
+        """حساب عوامل الخطر بناءً على بيانات المستخدم"""
+        risk_factors = []
+        
+        # مخاطر العمر
+        if self.user_age:
+            if self.user_age > 50:
+                risk_factors.append({
+                    'factor': 'age',
+                    'level': 'high',
+                    'message_ar': 'عمرك فوق 50 سنة - يوصى بفحوصات دورية شاملة',
+                    'message_en': 'Age over 50 - comprehensive regular checkups recommended'
+                })
+            elif self.user_age > 40:
+                risk_factors.append({
+                    'factor': 'age',
+                    'level': 'medium',
+                    'message_ar': 'عمرك فوق 40 سنة - راقب ضغط الدم والسكر',
+                    'message_en': 'Age over 40 - monitor blood pressure and sugar'
+                })
+        
+        # مخاطر الجنس
+        if self.user_gender == 'M' and self.user_age and self.user_age > 45:
+            risk_factors.append({
+                'factor': 'gender',
+                'level': 'medium',
+                'message_ar': 'الرجال فوق 45 أكثر عرضة لأمراض القلب',
+                'message_en': 'Men over 45 are more susceptible to heart disease'
+            })
+        
+        # مخاطر BMI
+        if self.user_bmi:
+            if self.user_bmi > 30:
+                risk_factors.append({
+                    'factor': 'bmi',
+                    'level': 'high',
+                    'message_ar': f'مؤشر كتلة جسمك {self.user_bmi} - زيادة الوزن تزيد من مخاطر صحية متعددة',
+                    'message_en': f'Your BMI is {self.user_bmi} - overweight increases multiple health risks'
+                })
+            elif self.user_bmi < 18.5:
+                risk_factors.append({
+                    'factor': 'bmi',
+                    'level': 'medium',
+                    'message_ar': 'نقص الوزن - قد يؤثر على مناعتك وطاقتك',
+                    'message_en': 'Underweight - may affect your immunity and energy'
+                })
+        
+        # مخاطر الوظيفة
+        sedentary_occupations = ['Student', 'Full-Time']
+        if self.user_occupation in sedentary_occupations:
+            risk_factors.append({
+                'factor': 'occupation',
+                'level': 'medium',
+                'message_ar': 'وظيفتك تتطلب الجلوس لفترات طويلة - خذ فترات راحة للحركة',
+                'message_en': 'Your occupation requires long sitting periods - take movement breaks'
+            })
+        
+        return risk_factors
     
     def _t(self, ar_text, en_text, **kwargs):
         """ترجمة النصوص حسب اللغة المحددة"""
@@ -170,935 +199,550 @@ class HealthInsightsEngine:
                 return text
         return text
     
-    def analyze_all(self):
-        """تحليل جميع الجوانب الصحية وإرجاع توصيات ذكية"""
-        return {
-            'user_profile_analysis': self.analyze_user_profile(),
-            'vital_signs_analysis': self.analyze_vital_signs(),
-            'bmi_deep_analysis': self.analyze_bmi_deep(),
-            'body_composition_analysis': self.analyze_body_composition(),
-            'metabolic_analysis': self.analyze_metabolic_health(),
-            'activity_nutrition_correlation': self.analyze_activity_nutrition(),
-            'sleep_mood_correlation': self.analyze_sleep_mood(),
-            'weight_trend_analysis': self.analyze_weight_trends(),
-            'blood_pressure_insights': self.analyze_blood_pressure(),
-            'glucose_risk_assessment': self.analyze_glucose_risks(),
-            'energy_consumption_alert': self.analyze_energy_consumption(),
-            'pulse_pressure_analysis': self.analyze_pulse_pressure(),
-            'pre_exercise_recommendation': self.analyze_pre_exercise_risk(),
-            'age_related_risks': self.analyze_age_related_risks(),
-            'lifestyle_score': self.calculate_lifestyle_score(),
-            'personalized_recommendations': self.generate_personalized_recommendations(),
-            'predictive_alerts': self.generate_predictive_alerts(),
-            'health_goals_suggestions': self.suggest_health_goals(),
-        }
-    
-    def analyze_user_profile(self):
-        """تحليل الملف الشخصي للمستخدم"""
-        profile_data = {
-            'age': self.user_age,
-            'gender': self.user_profile.gender if self.user_profile else None,
-            'height_cm': self.user_profile.height_cm if self.user_profile else None,
-            'occupation': self.user_profile.occupation if self.user_profile else None,
-            'activity_level': self.user_profile.activity_level if self.user_profile else None,
-            'smoking': self.user_profile.smoking if self.user_profile else None,
-            'chronic_diseases': [],
+    def _prepare_dataframe(self):
+        """تحضير DataFrame موحد للتحليل مع تضمين بيانات المستخدم الشخصية"""
+        
+        # جلب جميع بيانات المستخدم
+        health_records = HealthStatus.objects.filter(user=self.user).order_by('recorded_at')
+        activities = PhysicalActivity.objects.filter(user=self.user).order_by('start_time')
+        
+        if not health_records.exists():
+            return None
+        
+        # ✅ إضافة البيانات الشخصية الثابتة للمستخدم
+        user_features = {
+            'user_age': self.user_age or 30,
+            'user_gender_male': 1 if self.user_gender == 'M' else 0,
+            'user_gender_female': 1 if self.user_gender == 'F' else 0,
+            'user_height': self.user_height or 170,
+            'user_initial_weight': self.user_initial_weight or 70,
+            'user_bmi': self.user_bmi or 24,
+            'activity_level_score': self._get_activity_score(),
+            'health_goal_loss': 1 if self.user_health_goal == 'loss' else 0,
+            'health_goal_gain': 1 if self.user_health_goal == 'gain' else 0,
+            'health_goal_maintain': 1 if self.user_health_goal == 'maintain' else 0,
         }
         
-        # جلب الأمراض المزمنة
-        if hasattr(self.user, 'chronic_conditions'):
-            profile_data['chronic_diseases'] = list(self.user.chronic_conditions.values_list('name', flat=True))
-        
-        # تحليل المخاطر حسب العمر
-        age_risks = []
-        if self.user_age:
-            if self.user_age < 18:
-                age_risks.append({
-                    'risk': 'مراهق',
-                    'advice_ar': 'ركز على النمو الصحي والتغذية المتوازنة',
-                    'advice_en': 'Focus on healthy growth and balanced nutrition'
-                })
-            elif 18 <= self.user_age < 30:
-                age_risks.append({
-                    'risk': 'شاب',
-                    'advice_ar': 'بناء عادات صحية تدوم مدى الحياة',
-                    'advice_en': 'Build lifelong healthy habits'
-                })
-            elif 30 <= self.user_age < 50:
-                age_risks.append({
-                    'risk': 'متوسط العمر',
-                    'advice_ar': 'مراقبة الضغط والسكر والكوليسترول',
-                    'advice_en': 'Monitor blood pressure, sugar, and cholesterol'
-                })
-            elif 50 <= self.user_age < 70:
-                age_risks.append({
-                    'risk': 'كبار السن',
-                    'advice_ar': 'فحوصات دورية شاملة والحفاظ على النشاط',
-                    'advice_en': 'Regular comprehensive checkups and maintain activity'
-                })
-            else:
-                age_risks.append({
-                    'risk': 'متقدم في السن',
-                    'advice_ar': 'رعاية صحية مكثفة ومتابعة دائمة',
-                    'advice_en': 'Intensive healthcare and constant monitoring'
-                })
-        
-        # تحليل المخاطر حسب الوظيفة
-        occupation_risks = []
-        if profile_data['occupation']:
-            sedentary_jobs = ['office', 'programmer', 'accountant', 'teacher', 'admin']
-            active_jobs = ['construction', 'nurse', 'athlete', 'trainer']
-            
-            if any(job in profile_data['occupation'].lower() for job in sedentary_jobs):
-                occupation_risks.append({
-                    'risk': 'عمل مكتبي',
-                    'advice_ar': 'خذ فترات راحة للحركة كل ساعة، تمرن بعد العمل',
-                    'advice_en': 'Take movement breaks every hour, exercise after work'
-                })
-        
-        return {
-            'profile': profile_data,
-            'age_risks': age_risks,
-            'occupation_risks': occupation_risks,
-            'complete_profile': bool(profile_data['height_cm'] and profile_data['gender'] and self.user_age),
-            'missing_data': self._get_missing_profile_fields(profile_data)
-        }
-    
-    def _get_missing_profile_fields(self, profile_data):
-        """تحديد البيانات الناقصة في الملف الشخصي"""
-        missing = []
-        if not profile_data['height_cm']:
-            missing.append('الطول' if self.is_arabic else 'height')
-        if not profile_data['gender']:
-            missing.append('الجنس' if self.is_arabic else 'gender')
-        if not self.user_age:
-            missing.append('تاريخ الميلاد' if self.is_arabic else 'birth date')
-        if not profile_data['activity_level']:
-            missing.append('مستوى النشاط' if self.is_arabic else 'activity level')
-        return missing
-    
-    def analyze_bmi_deep(self):
-        """تحليل عميق لمؤشر كتلة الجسم"""
-        latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
-        
-        if not latest or not latest.weight_kg:
-            return {'status': 'insufficient_data', 'message': self._t('لا توجد بيانات وزن كافية', 'Insufficient weight data')}
-        
-        weight = float(latest.weight_kg)
-        height_cm = self.user_profile.height_cm if self.user_profile else None
-        
-        if not height_cm:
-            return {'status': 'missing_height', 'message': self._t('الطول غير مسجل، يرجى إضافته للحصول على تحليل دقيق', 'Height not recorded, please add for accurate analysis')}
-        
-        # حساب BMI
-        self.user_bmi = self._calculate_bmi(weight, height_cm)
-        bmi_category = self._get_bmi_category(self.user_bmi)
-        
-        # حساب الوزن المثالي
-        ideal_weight_min = 18.5 * ((height_cm / 100) ** 2)
-        ideal_weight_max = 24.9 * ((height_cm / 100) ** 2)
-        ideal_weight = round((ideal_weight_min + ideal_weight_max) / 2, 1)
-        weight_to_lose = weight - ideal_weight_max if weight > ideal_weight_max else 0
-        weight_to_gain = ideal_weight_min - weight if weight < ideal_weight_min else 0
-        
-        # نطاق الوزن الصحي حسب الجنس
-        if self.user_profile and self.user_profile.gender == 'female':
-            healthy_range = self._t('50-70 كجم للنساء', '50-70 kg for women')
-        else:
-            healthy_range = self._t('60-80 كجم للرجال', '60-80 kg for men')
-        
-        return {
-            'bmi': self.user_bmi,
-            'category': bmi_category['category'],
-            'severity': bmi_category['severity'],
-            'color': bmi_category['color'],
-            'recommendation': bmi_category['recommendation_ar' if self.is_arabic else 'recommendation_en'],
-            'risk_level': bmi_category['risk_level'],
-            'ideal_weight': ideal_weight,
-            'weight_to_lose': round(weight_to_lose, 1),
-            'weight_to_gain': round(weight_to_gain, 1),
-            'current_weight': weight,
-            'height_cm': height_cm,
-            'healthy_range': healthy_range,
-            'time_to_goal': self._estimate_time_to_goal(weight_to_lose, weight_to_gain),
-        }
-    
-    def _estimate_time_to_goal(self, weight_to_lose, weight_to_gain):
-        """تقدير الوقت اللازم للوصول للوزن المثالي"""
-        if weight_to_lose > 0:
-            # فقدان 0.5 كجم أسبوعياً هو المعدل الصحي
-            weeks = weight_to_lose / 0.5
-            return {
-                'action': 'lose',
-                'weeks': round(weeks),
-                'message_ar': f'تحتاج حوالي {round(weeks)} أسبوعاً لخسارة {weight_to_lose} كجم بمعدل 0.5 كجم أسبوعياً',
-                'message_en': f'Need about {round(weeks)} weeks to lose {weight_to_lose} kg at 0.5 kg per week'
+        # بناء DataFrame رئيسي
+        data = []
+        for record in health_records:
+            day_data = {
+                'date': record.recorded_at.date(),
+                'weight': float(record.weight_kg) if record.weight_kg else None,
+                'systolic': record.systolic_pressure,
+                'diastolic': record.diastolic_pressure,
+                'glucose': float(record.blood_glucose) if record.blood_glucose else None,
+                'heart_rate': record.heart_rate,
+                'oxygen': record.spo2,
+                'body_temperature': float(record.body_temperature) if record.body_temperature else None,
+                'pulse': record.pulse,
+                'respiration_rate': record.respiration_rate,
             }
-        elif weight_to_gain > 0:
-            weeks = weight_to_gain / 0.3
-            return {
-                'action': 'gain',
-                'weeks': round(weeks),
-                'message_ar': f'تحتاج حوالي {round(weeks)} أسبوعاً لاكتساب {weight_to_gain} كجم بمعدل 0.3 كجم أسبوعياً',
-                'message_en': f'Need about {round(weeks)} weeks to gain {weight_to_gain} kg at 0.3 kg per week'
-            }
-        return {'action': 'maintain', 'message_ar': 'أنت في وزن صحي، حافظ عليه', 'message_en': 'You are at healthy weight, maintain it'}
-    
-    def analyze_body_composition(self):
-        """تحليل تكوين الجسم"""
-        if not self.user_bmi:
-            latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
-            if latest and latest.weight_kg and self.user_profile and self.user_profile.height_cm:
-                self.user_bmi = self._calculate_bmi(float(latest.weight_kg), self.user_profile.height_cm)
-        
-        if not self.user_bmi or not self.user_age:
-            return {'status': 'insufficient_data'}
-        
-        gender = self.user_profile.gender if self.user_profile else 'unknown'
-        
-        # حساب نسبة الدهون
-        body_fat = self._calculate_body_fat_percentage(self.user_bmi, self.user_age, gender)
-        
-        # تصنيف نسبة الدهون
-        if gender == 'male':
-            if body_fat < 8:
-                category = 'رياضي محترف' if self.is_arabic else 'Athlete'
-            elif body_fat < 15:
-                category = 'رياضي' if self.is_arabic else 'Fit'
-            elif body_fat < 22:
-                category = 'طبيعي' if self.is_arabic else 'Normal'
-            elif body_fat < 28:
-                category = 'مرتفع' if self.is_arabic else 'High'
-            else:
-                category = 'خطير' if self.is_arabic else 'Dangerous'
-        else:
-            if body_fat < 14:
-                category = 'رياضي محترف' if self.is_arabic else 'Athlete'
-            elif body_fat < 21:
-                category = 'رياضي' if self.is_arabic else 'Fit'
-            elif body_fat < 28:
-                category = 'طبيعي' if self.is_arabic else 'Normal'
-            elif body_fat < 33:
-                category = 'مرتفع' if self.is_arabic else 'High'
-            else:
-                category = 'خطير' if self.is_arabic else 'Dangerous'
-        
-        # كتلة العضلات المقدرة
-        lean_mass = 100 - body_fat
-        estimated_muscle = round((lean_mass / 100) * 70, 1)  # تقدير تقريبي
-        
-        return {
-            'body_fat_percentage': body_fat,
-            'body_fat_category': category,
-            'estimated_muscle_mass_kg': estimated_muscle,
-            'muscle_category': 'جيد' if lean_mass > 70 else 'يحتاج تحسين',
-            'recommendation': self._get_body_composition_recommendation(category, gender),
-        }
-    
-    def _get_body_composition_recommendation(self, category, gender):
-        """توصيات تحسين تكوين الجسم"""
-        if category in ['رياضي محترف', 'رياضي', 'Athlete', 'Fit']:
-            return self._t('ممتاز! استمر في تمارين المقاومة للحفاظ على الكتلة العضلية', 'Excellent! Continue resistance training to maintain muscle mass')
-        elif category == 'طبيعي' or category == 'Normal':
-            return self._t('جيد. حاول زيادة تمارين القوة لتحسين نسبة الدهون للعضلات', 'Good. Try to increase strength training to improve fat-to-muscle ratio')
-        elif category == 'مرتفع' or category == 'High':
-            return self._t('يُنصح بزيادة النشاط الهوائي وتمارين المقاومة لتقليل الدهون', 'Recommended to increase aerobic activity and resistance training to reduce fat')
-        else:
-            return self._t('حالة تستدعي التدخل الطبي والرياضي الفوري', 'Condition requiring immediate medical and exercise intervention')
-    
-    def analyze_metabolic_health(self):
-        """تحليل الصحة الأيضية"""
-        latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
-        
-        if not latest:
-            return {'status': 'insufficient_data'}
-        
-        # حساب BMR الدقيق
-        weight = float(latest.weight_kg) if latest.weight_kg else None
-        height_cm = self.user_profile.height_cm if self.user_profile else None
-        gender = self.user_profile.gender if self.user_profile else 'unknown'
-        
-        bmr = None
-        if all([weight, height_cm, self.user_age, gender]):
-            bmr = self._calculate_bmr_precise(weight, height_cm, self.user_age, gender)
-        
-        # حساب TDEE (إجمالي السعرات اليومية)
-        activity_level = self.user_profile.activity_level if self.user_profile else 'moderate'
-        multiplier = self._get_activity_multiplier(activity_level)
-        tdee = bmr * multiplier if bmr else None
-        
-        # مقارنة مع السعرات المتناولة فعلياً
-        today = timezone.now().date()
-        today_calories = Meal.objects.filter(user=self.user, meal_time__date=today).aggregate(Sum('total_calories'))['total_calories__sum'] or 0
-        
-        return {
-            'bmr': bmr,
-            'tdee': round(tdee) if tdee else None,
-            'activity_multiplier': multiplier,
-            'calorie_status': 'excess' if today_calories > (tdee or 0) else 'deficit' if today_calories < (tdee or 0) else 'maintenance',
-            'calorie_diff': today_calories - round(tdee) if tdee else 0,
-            'metabolic_rate_category': self._get_metabolic_category(bmr, weight) if bmr else None,
-        }
-    
-    def _get_metabolic_category(self, bmr, weight):
-        """تصنيف معدل الأيض"""
-        bmr_per_kg = bmr / weight if weight else 0
-        if bmr_per_kg > 25:
-            return 'معدل حرق عالي' if self.is_arabic else 'High metabolism'
-        elif bmr_per_kg > 20:
-            return 'معدل حرق طبيعي' if self.is_arabic else 'Normal metabolism'
-        else:
-            return 'معدل حرق منخفض' if self.is_arabic else 'Low metabolism'
-    
-    def analyze_age_related_risks(self):
-        """تحليل المخاطر المرتبطة بالعمر"""
-        if not self.user_age:
-            return {'status': 'age_not_available'}
-        
-        risks = []
-        
-        # مخاطر حسب العمر
-        if self.user_age >= 40:
-            risks.append({
-                'condition': 'ضغط الدم' if self.is_arabic else 'High Blood Pressure',
-                'risk': 'مرتفع' if self.is_arabic else 'High',
-                'check_frequency': 'كل 6 أشهر' if self.is_arabic else 'Every 6 months'
-            })
-        
-        if self.user_age >= 45:
-            risks.append({
-                'condition': 'السكري' if self.is_arabic else 'Diabetes',
-                'risk': 'متوسط' if self.is_arabic else 'Moderate',
-                'check_frequency': 'سنوياً' if self.is_arabic else 'Annually'
-            })
-        
-        if self.user_age >= 50:
-            risks.append({
-                'condition': 'الكوليسترول' if self.is_arabic else 'Cholesterol',
-                'risk': 'مرتفع' if self.is_arabic else 'High',
-                'check_frequency': 'كل 6 أشهر' if self.is_arabic else 'Every 6 months'
-            })
-        
-        if self.user_profile and self.user_profile.smoking:
-            risks.append({
-                'condition': 'أمراض القلب والرئة' if self.is_arabic else 'Heart & Lung Disease',
-                'risk': 'مرتفع جداً' if self.is_arabic else 'Very High',
-                'check_frequency': 'كل 3 أشهر' if self.is_arabic else 'Every 3 months'
-            })
-        
-        return {
-            'age': self.user_age,
-            'risks': risks,
-            'screening_recommendations': self._get_screening_recommendations(),
-            'preventive_measures': self._get_preventive_measures(),
-        }
-    
-    def _get_screening_recommendations(self):
-        """توصيات الفحوصات الدورية"""
-        recommendations = []
-        
-        if not self.user_age:
-            return recommendations
-        
-        if self.user_age >= 20:
-            recommendations.append(self._t('فحص ضغط الدم كل سنتين', 'Blood pressure check every 2 years'))
-        if self.user_age >= 30:
-            recommendations.append(self._t('فحص الكوليسترول كل 5 سنوات', 'Cholesterol check every 5 years'))
-        if self.user_age >= 35 and self.user_profile and self.user_profile.gender == 'female':
-            recommendations.append(self._t('فحص الثدي (ماموغرام) سنوياً', 'Annual mammogram'))
-        if self.user_age >= 40:
-            recommendations.append(self._t('فحص السكر كل 3 سنوات', 'Blood sugar check every 3 years'))
-        if self.user_age >= 50:
-            recommendations.append(self._t('فحص القولون كل 10 سنوات', 'Colonoscopy every 10 years'))
-        
-        return recommendations
-    
-    def _get_preventive_measures(self):
-        """الإجراءات الوقائية حسب العمر"""
-        measures = []
-        
-        if self.user_age:
-            if self.user_age < 30:
-                measures.append(self._t('بناء عادات صحية مبكرة', 'Build early healthy habits'))
-            elif self.user_age < 50:
-                measures.append(self._t('مراقبة العلامات الحيوية وتعديل نمط الحياة', 'Monitor vital signs and adjust lifestyle'))
-            else:
-                measures.append(self._t('فحوصات دورية شاملة والحفاظ على النشاط', 'Comprehensive regular checkups and maintain activity'))
-        
-        if self.user_profile and self.user_profile.smoking:
-            measures.append(self._t('برنامج للإقلاع عن التدخين', 'Smoking cessation program'))
-        
-        return measures
-    
-    def calculate_lifestyle_score(self):
-        """حساب درجة نمط الحياة الصحية (0-100)"""
-        score = 70  # درجة أساسية
-        details = []
-        
-        # تحليل النشاط البدني
-        weekly_activities = PhysicalActivity.objects.filter(
-            user=self.user, start_time__date__gte=self.week_ago
-        )
-        total_weekly_minutes = weekly_activities.aggregate(Sum('duration_minutes'))['duration_minutes__sum'] or 0
-        
-        if total_weekly_minutes >= 150:
-            score += 15
-            details.append(self._t('✅ نشاط ممتاز: أكثر من 150 دقيقة أسبوعياً', 'Excellent activity: over 150 minutes weekly'))
-        elif total_weekly_minutes >= 75:
-            score += 8
-            details.append(self._t('⚠️ نشاط جيد: يوصى بزيادته إلى 150 دقيقة', 'Good activity: recommended to increase to 150 minutes'))
-        else:
-            score -= 10
-            details.append(self._t('⚠️ نشاط قليل: يجب زيادة النشاط البدني', 'Low activity: need to increase physical activity'))
-        
-        # تحليل النوم
-        sleeps = Sleep.objects.filter(user=self.user, sleep_start__date__gte=self.week_ago)
-        if sleeps.exists():
-            total_sleep = 0
-            for sleep in sleeps:
-                if sleep.sleep_start and sleep.sleep_end:
-                    duration = (sleep.sleep_end - sleep.sleep_start).seconds / 3600
-                    total_sleep += duration
-            avg_sleep = total_sleep / sleeps.count()
             
-            if 7 <= avg_sleep <= 9:
-                score += 10
-                details.append(self._t('✅ نوم مثالي: 7-9 ساعات ليلاً', 'Perfect sleep: 7-9 hours nightly'))
-            elif 6 <= avg_sleep < 7 or 9 < avg_sleep <= 10:
-                score += 5
-                details.append(self._t('⚠️ نوم مقبول: حاول تحسين جودة النوم', 'Acceptable sleep: try to improve sleep quality'))
+            # إضافة الأنشطة في نفس اليوم
+            day_activities = activities.filter(start_time__date=record.recorded_at.date())
+            day_data['total_activity_minutes'] = day_activities.aggregate(Sum('duration_minutes'))['duration_minutes__sum'] or 0
+            day_data['calories_burned'] = day_activities.aggregate(Sum('calories_burned'))['calories_burned__sum'] or 0
+            day_data['activity_count'] = day_activities.count()
+            
+            # ✅ إضافة متوسط مدة النشاط
+            if day_data['activity_count'] > 0:
+                day_data['avg_activity_duration'] = day_data['total_activity_minutes'] / day_data['activity_count']
             else:
-                score -= 10
-                details.append(self._t('⚠️ نوم غير صحي: يوصى بتنظيم مواعيد النوم', 'Unhealthy sleep: recommended to regulate sleep schedule'))
+                day_data['avg_activity_duration'] = 0
+            
+            # ✅ إضافة جميع البيانات الشخصية
+            day_data.update(user_features)
+            
+            data.append(day_data)
         
-        # تحليل التغذية
-        meals = Meal.objects.filter(user=self.user, meal_time__date=self.today)
-        if meals.count() >= 3:
-            score += 5
-            details.append(self._t('✅ منتظم في الوجبات', 'Regular meals'))
+        df = pd.DataFrame(data)
         
-        # تحليل الحالة المزاجية
-        mood = MoodEntry.objects.filter(user=self.user).order_by('-entry_time').first()
-        if mood:
-            good_moods = ['happy', 'excited', 'good', 'energetic']
-            if mood.mood in good_moods:
-                score += 5
-                details.append(self._t('✅ مزاج إيجابي يؤثر صحياً على الجسم', 'Positive mood positively affects health'))
+        # تنظيف البيانات
+        df = df.dropna(subset=['weight'], how='any')
+        df['date'] = pd.to_datetime(df['date'])
         
-        score = max(0, min(100, score))
-        
-        return {
-            'score': score,
-            'category': self._get_lifestyle_category(score),
-            'details': details,
-            'recommendations': self._get_lifestyle_recommendations(score, details),
+        return df
+    
+    def _get_activity_score(self):
+        """تحويل مستوى النشاط إلى درجة رقمية"""
+        scores = {
+            'low': 1,
+            'medium': 2,
+            'high': 3
         }
+        return scores.get(self.user_activity_level, 2)
     
-    def _get_lifestyle_category(self, score):
-        """تصنيف نمط الحياة"""
-        if score >= 80:
-            return self._t('ممتاز 🌟', 'Excellent 🌟')
-        elif score >= 60:
-            return self._t('جيد 👍', 'Good 👍')
-        elif score >= 40:
-            return self._t('مقبول 📊', 'Fair 📊')
-        else:
-            return self._t('يحتاج تحسين ⚠️', 'Needs improvement ⚠️')
+    # ==========================================================================
+    # ✅ تحليل جديد: توصيات مخصصة بناءً على ملف المستخدم الشخصي
+    # ==========================================================================
     
-    def _get_lifestyle_recommendations(self, score, details):
-        """توصيات تحسين نمط الحياة"""
-        recommendations = []
-        
-        if 'نشاط قليل' in str(details):
-            recommendations.append(self._t('🏃 ابدأ بالمشي 20 دقيقة يومياً', '🏃 Start with 20 minutes of walking daily'))
-        
-        if 'نوم غير صحي' in str(details):
-            recommendations.append(self._t('😴 ثبّت موعد النوم والاستيقاظ يومياً', '😴 Set a consistent sleep and wake time daily'))
-        
-        if 'منتظم في الوجبات' not in str(details):
-            recommendations.append(self._t('🥗 نظّم وجباتك الثلاث الرئيسية يومياً', '🥗 Organize your three main meals daily'))
-        
-        if score < 50:
-            recommendations.append(self._t('📱 استخدم تذكيرات يومية للعادات الصحية', '📱 Use daily reminders for healthy habits'))
-        
-        return recommendations
-    
-    def generate_personalized_recommendations(self):
-        """توليد توصيات شخصية متكاملة"""
-        recommendations = []
-        
-        # توصيات الوزن
-        bmi_analysis = self.analyze_bmi_deep()
-        if bmi_analysis.get('status') != 'insufficient_data' and bmi_analysis.get('bmi'):
-            if bmi_analysis['weight_to_lose'] > 0:
-                recommendations.append({
-                    'type': 'weight_loss',
-                    'priority': 'high',
-                    'icon': '⚖️',
-                    'title': self._t('برنامج خسارة الوزن', 'Weight Loss Program'),
-                    'description': bmi_analysis.get('time_to_goal', {}).get(f'message_{self.language}', ''),
-                    'actions': [
-                        self._t('قلل 500 سعرة حرارية يومياً', 'Reduce 500 calories daily'),
-                        self._t('مارس المشي 45 دقيقة يومياً', 'Walk 45 minutes daily'),
-                        self._t('تناول البروتين في كل وجبة', 'Eat protein with every meal'),
-                    ]
-                })
-            
-            elif bmi_analysis['weight_to_gain'] > 0:
-                recommendations.append({
-                    'type': 'weight_gain',
-                    'priority': 'high',
-                    'icon': '💪',
-                    'title': self._t('زيادة الوزن الصحي', 'Healthy Weight Gain'),
-                    'description': bmi_analysis.get('time_to_goal', {}).get(f'message_{self.language}', ''),
-                    'actions': [
-                        self._t('زد 300-500 سعرة حرارية يومياً', 'Increase 300-500 calories daily'),
-                        self._t('تمارين المقاومة 3 مرات أسبوعياً', 'Resistance training 3 times weekly'),
-                        self._t('تناول بروتين إضافي بعد التمرين', 'Extra protein after workout'),
-                    ]
-                })
-        
-        # توصيات النشاط حسب العمر والوظيفة
-        profile = self.analyze_user_profile()
-        if profile.get('occupation_risks'):
-            recommendations.append({
-                'type': 'activity',
-                'priority': 'medium',
-                'icon': '🪑',
-                'title': self._t('نصائح للعمل المكتبي', 'Office Work Tips'),
-                'description': profile['occupation_risks'][0]['advice_ar' if self.is_arabic else 'advice_en'],
-                'actions': [
-                    self._t('قف وتمدد كل ساعة', 'Stand and stretch every hour'),
-                    self._t('استخدم كرسي مريح للظهر', 'Use an ergonomic chair'),
-                    self._t('مارس تمارين الرقبة والكتفين', 'Do neck and shoulder exercises'),
-                ]
-            })
-        
-        # توصيات حسب العمر
-        age_risks = self.analyze_age_related_risks()
-        if age_risks.get('risks'):
-            recommendations.append({
-                'type': 'preventive',
-                'priority': 'high',
-                'icon': '🩺',
-                'title': self._t('فحوصات وقائية موصى بها', 'Recommended Preventive Screenings'),
-                'description': self._t('بناءً على عمرك وخطرتك الصحية', 'Based on your age and health risks'),
-                'actions': [f"📋 {r.get('condition')}" for r in age_risks['risks'][:3]],
-            })
-        
-        # توصيات الصحة الأيضية
-        metabolic = self.analyze_metabolic_health()
-        if metabolic.get('calorie_status') == 'excess':
-            recommendations.append({
-                'type': 'diet',
-                'priority': 'medium',
-                'icon': '🍽️',
-                'title': self._t('تعديل السعرات الحرارية', 'Calorie Adjustment'),
-                'description': self._t(f"تتناول {abs(metabolic['calorie_diff'])} سعرة إضافية يومياً", f"Consuming {abs(metabolic['calorie_diff'])} extra calories daily"),
-                'actions': [
-                    self._t('قلل من السكريات والمقليات', 'Reduce sugars and fried foods'),
-                    self._t('استخدم صحون أصغر للتحكم بالكميات', 'Use smaller plates for portion control'),
-                ]
-            })
-        
-        return recommendations
-    
-    def suggest_health_goals(self):
-        """اقتراح أهداف صحية ذكية"""
-        goals = []
-        lifestyle = self.calculate_lifestyle_score()
-        bmi_analysis = self.analyze_bmi_deep()
-        
-        # أهداف الوزن
-        if bmi_analysis.get('status') != 'insufficient_data':
-            if bmi_analysis.get('weight_to_lose', 0) > 5:
-                goals.append({
-                    'category': 'weight',
-                    'title': self._t(f'خسارة {round(bmi_analysis["weight_to_lose"])} كجم', f'Lose {round(bmi_analysis["weight_to_lose"])} kg'),
-                    'deadline': '3 أشهر' if self.is_arabic else '3 months',
-                    'difficulty': 'medium',
-                    'reward': self._t('🎯 تحسين الصحة العامة وتقليل مخاطر الأمراض', '🎯 Improve overall health and reduce disease risks')
-                })
-            
-            elif bmi_analysis.get('weight_to_gain', 0) > 2:
-                goals.append({
-                    'category': 'weight',
-                    'title': self._t(f'زيادة {round(bmi_analysis["weight_to_gain"])} كجم كتلة عضلية', f'Gain {round(bmi_analysis["weight_to_gain"])} kg of muscle mass'),
-                    'deadline': '4 أشهر' if self.is_arabic else '4 months',
-                    'difficulty': 'medium',
-                    'reward': self._t('💪 تحسين القوة واللياقة البدنية', '💪 Improve strength and fitness')
-                })
-        
-        # أهداف النشاط
-        weekly_activities = PhysicalActivity.objects.filter(
-            user=self.user, start_time__date__gte=self.week_ago
-        )
-        total_minutes = weekly_activities.aggregate(Sum('duration_minutes'))['duration_minutes__sum'] or 0
-        
-        if total_minutes < 150:
-            goals.append({
-                'category': 'activity',
-                'title': self._t('المشي 30 دقيقة يومياً لمدة 5 أيام في الأسبوع', 'Walk 30 minutes daily for 5 days per week'),
-                'deadline': 'شهر واحد' if self.is_arabic else '1 month',
-                'difficulty': 'easy',
-                'reward': self._t('🏆 تحسين صحة القلب والجهاز التنفسي', '🏆 Improve cardiovascular and respiratory health')
-            })
-        
-        # أهداف النوم
-        sleeps = Sleep.objects.filter(user=self.user, sleep_start__date__gte=self.week_ago)
-        if sleeps.exists():
-            avg_sleep = sleeps.aggregate(Avg('duration'))['duration__avg'] or 0
-            if avg_sleep < 7 or avg_sleep > 9:
-                goals.append({
-                    'category': 'sleep',
-                    'title': self._t('تنظيم النوم: 8 ساعات يومياً', 'Sleep regulation: 8 hours daily'),
-                    'deadline': 'أسبوعين' if self.is_arabic else '2 weeks',
-                    'difficulty': 'easy',
-                    'reward': self._t('😴 تحسين التركيز والمزاج والطاقة', '😴 Improve focus, mood and energy')
-                })
-        
-        return goals
-    
-    def analyze_vital_signs(self):
-        """تحليل العلامات الحيوية الحالية"""
-        latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
-        
-        if not latest:
-            return {'status': 'no_data', 'message': self._t('لا توجد بيانات كافية', 'Insufficient data')}
-        
-        insights = []
-        alerts = []
-        
-        # تحليل الوزن
-        weight = latest.weight_kg
-        if weight:
-            weight = float(weight)
-            if weight < 50:
-                insights.append({
-                    'type': 'weight',
-                    'severity': 'warning',
-                    'message': self._t('⚠️ وزنك منخفض جداً', '⚠️ Your weight is very low'),
-                    'details': self._t(f'{weight} كجم أقل من المعدل الطبيعي', f'{weight} kg below normal'),
-                    'recommendation': self._t('تحتاج لزيادة السعرات الحرارية والبروتين', 'You need to increase calories and protein')
-                })
-            elif weight > 100:
-                insights.append({
-                    'type': 'weight',
-                    'severity': 'warning',
-                    'message': self._t('⚠️ وزنك مرتفع', '⚠️ Your weight is high'),
-                    'details': self._t(f'{weight} كجم أعلى من المعدل', f'{weight} kg above normal'),
-                    'recommendation': self._t('جرب المشي 30 دقيقة يومياً وقلل السكريات', 'Try walking 30 minutes daily and reduce sugars')
-                })
-            else:
-                insights.append({
-                    'type': 'weight',
-                    'severity': 'good',
-                    'message': self._t('✅ وزنك في المعدل المثالي', '✅ Your weight is ideal'),
-                    'details': self._t(f'{weight} كجم', f'{weight} kg'),
-                    'recommendation': self._t('حافظ على نظامك الحالي', 'Maintain your current routine')
-                })
-        
-        # تحليل ضغط الدم
-        systolic = latest.systolic_pressure
-        diastolic = latest.diastolic_pressure
-        pulse_pressure = (systolic - diastolic) if systolic and diastolic else None
-        
-        if systolic and diastolic:
-            if pulse_pressure > 60:
-                alerts.append({
-                    'type': 'pulse_pressure',
-                    'severity': 'high',
-                    'message': self._t('❤️‍🩹 فرق الضغط كبير جداً', '❤️‍🩹 Pulse pressure is very high'),
-                    'details': self._t(f'الفرق {pulse_pressure} مم زئبق (الطبيعي 40-60)', f'Difference {pulse_pressure} mmHg (normal 40-60)'),
-                    'recommendation': self._t('قد يشير لصلابة الشرايين، استشر طبيباً', 'May indicate arterial stiffness, consult a doctor')
-                })
-            elif pulse_pressure < 30:
-                alerts.append({
-                    'type': 'pulse_pressure',
-                    'severity': 'low',
-                    'message': self._t('💓 فرق الضغط منخفض', '💓 Pulse pressure is low'),
-                    'details': self._t(f'الفرق {pulse_pressure} مم زئبق', f'Difference {pulse_pressure} mmHg'),
-                    'recommendation': self._t('قد يشير لضعف القلب، راقب الأعراض', 'May indicate heart weakness, monitor symptoms')
-                })
-        
-        # تحليل الجلوكوز
-        glucose = latest.blood_glucose
-        if glucose:
-            glucose = float(glucose)
-            if glucose > 140:
-                insights.append({
-                    'type': 'glucose',
-                    'severity': 'high',
-                    'message': self._t('🩸 سكر الدم مرتفع', '🩸 Blood sugar is high'),
-                    'details': self._t(f'{glucose} mg/dL أعلى من الطبيعي', f'{glucose} mg/dL above normal'),
-                    'recommendation': self._t('قلل الكربوهيدرات البسيطة وامش 15 دقيقة', 'Reduce simple carbs and walk 15 minutes')
-                })
-            elif glucose < 70:
-                insights.append({
-                    'type': 'glucose',
-                    'severity': 'low',
-                    'message': self._t('🆘 سكر الدم منخفض!', '🆘 Blood sugar is low!'),
-                    'details': self._t(f'{glucose} mg/dL أقل من الطبيعي', f'{glucose} mg/dL below normal'),
-                    'recommendation': self._t('تناول مصدر سكر سريع (عصير، تمر)', 'Eat a quick sugar source (juice, dates)')
-                })
-        
-        return {
-            'vital_signs': {
-                'weight': float(weight) if weight else None,
-                'blood_pressure': f"{systolic}/{diastolic}" if systolic and diastolic else None,
-                'glucose': float(glucose) if glucose else None,
-                'recorded_at': latest.recorded_at
+    def analyze_user_profile_health(self):
+        """
+        تحليل شامل لملف المستخدم الشخصي وإنتاج توصيات مخصصة
+        """
+        profile_analysis = {
+            'basic_info': {
+                'age': self.user_age,
+                'gender': self._t('ذكر', 'Male') if self.user_gender == 'M' else self._t('أنثى', 'Female') if self.user_gender == 'F' else None,
+                'height_cm': self.user_height,
+                'initial_weight_kg': self.user_initial_weight,
+                'bmi': self.user_bmi,
+                'health_goal': self.health_goal_text,
+                'activity_level': self.user_activity_level,
+                'occupation': self.user_occupation,
             },
-            'insights': insights,
-            'alerts': alerts,
-            'pulse_pressure': pulse_pressure
+            'age_category': self.age_category,
+            'risk_factors': self.risk_factors,
+            'personalized_recommendations': self._generate_profile_recommendations(),
+            'bmi_analysis': self._analyze_bmi_with_profile(),
+            'goal_alignment': self._check_goal_alignment(),
         }
+        
+        return profile_analysis
     
-    def analyze_energy_consumption(self):
-        """تحليل استهلاك الطاقة"""
-        latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
-        
-        if not latest or not latest.weight_kg:
-            return {'status': 'insufficient_data'}
-        
-        weight = float(latest.weight_kg)
-        bmr = weight * 22
-        
-        weekly_activity = PhysicalActivity.objects.filter(
-            user=self.user, start_time__date__gte=self.week_ago
-        ).aggregate(Sum('calories_burned'))['calories_burned__sum'] or 0
-        
-        daily_activity = weekly_activity / 7
-        total_daily_burn = bmr + daily_activity
-        
-        avg_daily_intake = Meal.objects.filter(
-            user=self.user, meal_time__date__gte=self.week_ago
-        ).aggregate(Avg('total_calories'))['total_calories__avg'] or 0
-        
-        return {
-            'weight': weight,
-            'bmr': int(bmr),
-            'daily_activity_burn': int(daily_activity),
-            'total_daily_burn': int(total_daily_burn),
-            'avg_daily_intake': int(avg_daily_intake),
-            'deficit': int(total_daily_burn - avg_daily_intake)
-        }
-    
-    def analyze_pulse_pressure(self):
-        """تحليل ضغط النبض"""
-        latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
-        
-        if not latest or not latest.systolic_pressure or not latest.diastolic_pressure:
-            return {'status': 'insufficient_data'}
-        
-        systolic = latest.systolic_pressure
-        diastolic = latest.diastolic_pressure
-        pulse_pressure = systolic - diastolic
-        
-        return {
-            'systolic': systolic,
-            'diastolic': diastolic,
-            'pulse_pressure': pulse_pressure,
-            'severity': 'critical' if pulse_pressure < 15 else 'warning' if pulse_pressure < 30 else 'normal'
-        }
-    
-    def analyze_pre_exercise_risk(self):
-        """تحليل مخاطر التمرين"""
-        latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
-        
-        if not latest:
-            return {'status': 'insufficient_data'}
-        
-        glucose = latest.blood_glucose
-        systolic = latest.systolic_pressure
-        diastolic = latest.diastolic_pressure
-        
-        recommendations = []
-        
-        if glucose and glucose < 100:
-            glucose = float(glucose)
-            if glucose < 80:
-                recommendations.append({
-                    'type': 'critical',
-                    'icon': '🚨',
-                    'title': self._t('خطر انخفاض السكر', 'Low Blood Sugar Risk'),
-                    'message': self._t('سكر الدم منخفض قبل التمرين', 'Blood sugar is low before exercise'),
-                    'advice': self._t('تناول وجبة خفيفة تحتوي على كربوهيدرات قبل التمرين', 'Eat a light carbohydrate-rich meal before exercise')
-                })
-        
-        if systolic and diastolic:
-            if systolic > 140 or diastolic > 90:
-                recommendations.append({
-                    'type': 'warning',
-                    'icon': '❤️',
-                    'title': self._t('ضغط الدم مرتفع', 'High Blood Pressure'),
-                    'message': self._t('ضغطك مرتفع للتمرين المكثف', 'Your blood pressure is high for intense exercise'),
-                    'advice': self._t('مارس المشي بدلاً من الركض', 'Try walking instead of running')
-                })
-        
-        return {
-            'glucose': float(glucose) if glucose else None,
-            'blood_pressure': f"{systolic}/{diastolic}" if systolic and diastolic else None,
-            'recommendations': recommendations
-        }
-    
-    def analyze_activity_nutrition(self):
-        """تحليل العلاقة بين النشاط والتغذية"""
-        activities = PhysicalActivity.objects.filter(
-            user=self.user, start_time__date__gte=self.week_ago
-        )
-        
-        if not activities.exists():
-            return {'status': 'insufficient_data', 'message': self._t('لا توجد أنشطة كافية', 'Insufficient activity data')}
-        
-        return {'status': 'ok', 'total_activities': activities.count()}
-    
-    def analyze_sleep_mood(self):
-        """تحليل تأثير النوم على المزاج"""
-        sleep_records = Sleep.objects.filter(user=self.user, sleep_start__date__gte=self.week_ago)
-        
-        if not sleep_records.exists():
-            return {'status': 'insufficient_data'}
-        
-        return {'status': 'ok', 'sleep_count': sleep_records.count()}
-    
-    def analyze_weight_trends(self):
-        """تحليل اتجاهات الوزن"""
-        health_records = HealthStatus.objects.filter(user=self.user, weight_kg__isnull=False).order_by('recorded_at')
-        
-        if health_records.count() < 2:
-            return {'trend': 'insufficient_data'}
-        
-        first = health_records.first()
-        last = health_records.last()
-        
-        weight_change = float(last.weight_kg) - float(first.weight_kg)
-        days_diff = (last.recorded_at.date() - first.recorded_at.date()).days
-        
-        return {
-            'start_weight': float(first.weight_kg),
-            'current_weight': float(last.weight_kg),
-            'change': round(weight_change, 1),
-            'days_analyzed': days_diff,
-            'trend': self._t('زيادة', 'Increasing') if weight_change > 0 else self._t('نقصان', 'Decreasing') if weight_change < 0 else self._t('ثبات', 'Stable')
-        }
-    
-    def analyze_blood_pressure(self):
-        """تحليل ضغط الدم"""
-        records = HealthStatus.objects.filter(
-            user=self.user, systolic_pressure__isnull=False, diastolic_pressure__isnull=False
-        ).order_by('-recorded_at')[:10]
-        
-        if records.count() < 3:
-            return {'status': 'insufficient_data'}
-        
-        avg_sys = records.aggregate(Avg('systolic_pressure'))['systolic_pressure__avg']
-        avg_dia = records.aggregate(Avg('diastolic_pressure'))['diastolic_pressure__avg']
-        
-        return {'average': f"{avg_sys:.0f}/{avg_dia:.0f}", 'status': 'ok'}
-    
-    def analyze_glucose_risks(self):
-        """تحليل مخاطر السكر"""
-        records = HealthStatus.objects.filter(user=self.user, blood_glucose__isnull=False).order_by('-recorded_at')[:7]
-        
-        if records.count() < 2:
-            return {'status': 'insufficient_data'}
-        
-        glucose_values = [float(r.blood_glucose) for r in records if r.blood_glucose]
-        
-        if not glucose_values:
+    def _analyze_bmi_with_profile(self):
+        """تحليل BMI مع مراعاة العمر والجنس والهدف الصحي"""
+        if not self.user_bmi:
             return {'status': 'no_data'}
         
-        avg_glucose = sum(glucose_values) / len(glucose_values)
-        max_glucose = max(glucose_values)
-        min_glucose = min(glucose_values)
+        # تحديد النطاق المثالي حسب العمر
+        if self.user_age and self.user_age > 65:
+            ideal_min, ideal_max = 23, 27  # كبار السن
+        elif self.user_age and self.user_age < 18:
+            ideal_min, ideal_max = 18.5, 24  # المراهقين
+        else:
+            ideal_min, ideal_max = 18.5, 24.9  # البالغين
+        
+        if self.user_bmi < ideal_min:
+            status = 'underweight'
+            message = self._t('⚠️ وزنك أقل من المثالي لعمرك', '⚠️ Your weight is below ideal for your age')
+            advice = self._t('نوصي بزيادة السعرات الحرارية مع تمارين بناء العضلات', 'We recommend increasing calories with muscle building exercises')
+        elif self.user_bmi > ideal_max:
+            status = 'overweight'
+            message = self._t('⚠️ وزنك أعلى من المثالي لعمرك', '⚠️ Your weight is above ideal for your age')
+            advice = self._t('نوصي بتقليل السعرات وزيادة النشاط البدني اليومي', 'We recommend reducing calories and increasing daily physical activity')
+        else:
+            status = 'ideal'
+            message = self._t('✅ وزنك مثالي لعمرك!', '✅ Your weight is ideal for your age!')
+            advice = self._t('استمر في الحفاظ على هذا الوزن الصحي', 'Continue maintaining this healthy weight')
         
         return {
-            'average': round(avg_glucose, 1),
-            'range': f"{min_glucose:.0f} - {max_glucose:.0f}",
-            'status': 'ok'
+            'status': status,
+            'bmi': self.user_bmi,
+            'ideal_range': f"{ideal_min} - {ideal_max}",
+            'message': message,
+            'advice': advice
         }
     
-    def generate_holistic_recommendations(self):
-        """توليد توصيات شاملة"""
-        return []
+    def _check_goal_alignment(self):
+        """التحقق من توافق الوزن الحالي مع الهدف الصحي"""
+        if not self.user_health_goal or not self.user_bmi:
+            return {'aligned': True, 'message': self._t('حدد هدفك الصحي للحصول على توصيات أفضل', 'Set your health goal for better recommendations')}
+        
+        latest_weight = self._get_latest_weight()
+        if not latest_weight:
+            return {'aligned': True, 'message': ''}
+        
+        weight_change = latest_weight - (self.user_initial_weight or latest_weight)
+        
+        if self.user_health_goal == 'loss' and weight_change > 0:
+            return {
+                'aligned': False,
+                'message': self._t(f'⚠️ وزنك زاد {abs(weight_change):.1f} كجم بينما هدفك هو الخسارة', 
+                                  f'⚠️ Your weight increased by {abs(weight_change):.1f} kg while your goal is loss'),
+                'suggestion': self._t('حاول تقليل 300-500 سعرة حرارية يومياً', 'Try reducing 300-500 calories daily')
+            }
+        elif self.user_health_goal == 'gain' and weight_change < 0:
+            return {
+                'aligned': False,
+                'message': self._t(f'⚠️ وزنك نقص {abs(weight_change):.1f} كجم بينما هدفك الزيادة',
+                                  f'⚠️ Your weight decreased by {abs(weight_change):.1f} kg while your goal is gain'),
+                'suggestion': self._t('أضف 300-500 سعرة حرارية مع بروتين إضافي', 'Add 300-500 calories with extra protein')
+            }
+        
+        return {
+            'aligned': True,
+            'message': self._t('✅ أنت على المسار الصحيح لتحقيق هدفك!', '✅ You are on the right track to achieve your goal!')
+        }
     
-    def generate_predictive_alerts(self):
-        """توليد تنبيهات تنبؤية"""
-        return []
-# أضف هذا في نهاية ملف main/services/cross_insights_service.py
+    def _generate_profile_recommendations(self):
+        """توليد توصيات مخصصة بناءً على ملف المستخدم"""
+        recommendations = []
+        
+        # توصيات حسب العمر
+        if self.age_category == 'adolescent':
+            recommendations.append({
+                'category': 'age',
+                'icon': '🌱',
+                'title': self._t('نمو صحي', 'Healthy Growth'),
+                'advice': self._t('ركز على البروتين والكالسيوم وفيتامين د لدعم النمو', 'Focus on protein, calcium, and vitamin D to support growth')
+            })
+        elif self.age_category == 'senior' or self.age_category == 'elderly':
+            recommendations.append({
+                'category': 'age',
+                'icon': '🩺',
+                'title': self._t('صحة كبار السن', 'Senior Health'),
+                'advice': self._t('اهتم بتمارين التوازن والمرونة، وراقب ضغط الدم دورياً', 'Focus on balance and flexibility exercises, monitor blood pressure regularly')
+            })
+        
+        # توصيات حسب الهدف الصحي
+        if self.user_health_goal == 'loss':
+            recommendations.append({
+                'category': 'goal',
+                'icon': '🥗',
+                'title': self._t('لخسارة الوزن', 'For Weight Loss'),
+                'advice': self._t('ابدأ بالمشي 30 دقيقة يومياً، وتناول الخضروات في كل وجبة', 'Start with 30 minutes of walking daily, eat vegetables with every meal')
+            })
+        elif self.user_health_goal == 'gain':
+            recommendations.append({
+                'category': 'goal',
+                'icon': '💪',
+                'title': self._t('لزيادة الوزن', 'For Weight Gain'),
+                'advice': self._t('أضف المكسرات وزبدة الفول السوداني لوجباتك، ومارس تمارين المقاومة', 'Add nuts and peanut butter to your meals, practice resistance training')
+            })
+        
+        # توصيات حسب مستوى النشاط
+        if self.user_activity_level == 'low':
+            recommendations.append({
+                'category': 'activity',
+                'icon': '🚶',
+                'title': self._t('تحسين النشاط', 'Improve Activity'),
+                'advice': self._t('حاول المشي 10 دقائق بعد كل وجبة - 30 دقيقة يومياً', 'Try walking 10 minutes after each meal - 30 minutes daily')
+            })
+        
+        # توصيات حسب الوظيفة
+        if self.user_occupation in ['Student', 'Full-Time']:
+            recommendations.append({
+                'category': 'occupation',
+                'icon': '🪑',
+                'title': self._t('نصائح للعمل/الدراسة', 'Work/Study Tips'),
+                'advice': self._t('خذ استراحة حركة كل ساعة، واجلس بوضعية صحية', 'Take a movement break every hour, sit with proper posture')
+            })
+        
+        return recommendations
+    
+    def _get_latest_weight(self):
+        """جلب آخر وزن مسجل"""
+        latest = HealthStatus.objects.filter(user=self.user, weight_kg__isnull=False).order_by('-recorded_at').first()
+        return float(latest.weight_kg) if latest else None
+    
+    # ==========================================================================
+    # ✅ تحليل متقدم للعلامات الحيوية مع مراعاة بيانات المستخدم
+    # ==========================================================================
+    
+    def predict_weight_trend_with_profile(self):
+        """
+        التنبؤ باتجاه الوزن باستخدام Random Forest مع تضمين بيانات المستخدم الشخصية
+        """
+        df = self._prepare_dataframe()
+        if df is None or len(df) < 7:
+            return {'status': 'insufficient_data', 'message': self._t('لا توجد بيانات كافية للتنبؤ', 'Insufficient data for prediction')}
+        
+        # تحضير الميزات (بما فيها بيانات المستخدم)
+        df['day_of_week'] = df['date'].dt.dayofweek
+        df['day_of_month'] = df['date'].dt.day
+        df['weight_lag1'] = df['weight'].shift(1)
+        df['weight_lag3'] = df['weight'].shift(3)
+        df['weight_lag7'] = df['weight'].shift(7)
+        df['weight_ma3'] = df['weight'].rolling(window=3, min_periods=1).mean()
+        df['weight_ma7'] = df['weight'].rolling(window=7, min_periods=1).mean()
+        df['weight_diff'] = df['weight'].diff()
+        
+        # ✅ ميزات إضافية من بيانات المستخدم
+        df['calories_deficit'] = (df['calories_burned'] + (self.user_initial_weight or 70) * 22) - df['total_calories']
+        df['activity_per_kg'] = df['total_activity_minutes'] / df['weight']
+        df['age_normalized'] = df['user_age'] / 100
+        df['bmi_normalized'] = df['user_bmi'] / 50
+        
+        # ميزات التوافق مع الهدف
+        if self.user_health_goal == 'loss':
+            df['goal_direction'] = -1
+        elif self.user_health_goal == 'gain':
+            df['goal_direction'] = 1
+        else:
+            df['goal_direction'] = 0
+        
+        # قائمة الميزات
+        feature_cols = ['day_of_week', 'day_of_month', 'weight_lag1', 'weight_lag3', 
+                        'weight_lag7', 'weight_ma3', 'weight_ma7', 'weight_diff',
+                        'total_activity_minutes', 'total_calories', 'calories_deficit', 
+                        'activity_per_kg', 'age_normalized', 'bmi_normalized', 'goal_direction',
+                        'user_gender_male', 'activity_level_score']
+        
+        df_clean = df.dropna(subset=feature_cols).copy()
+        
+        if len(df_clean) < 10:
+            return {'status': 'insufficient_data'}
+        
+        # تدريب النموذج
+        X = df_clean[feature_cols].fillna(0)
+        y = df_clean['weight']
+        
+        model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=5)
+        model.fit(X[:-7] if len(X) > 7 else X, y[:-7] if len(y) > 7 else y)
+        
+        # التنبؤ
+        last_row = X.iloc[-1:].copy()
+        predictions = []
+        
+        for i in range(1, 15):
+            pred = model.predict(last_row)[0]
+            predictions.append(round(pred, 1))
+            
+            # تحديث الميزات
+            last_row['weight_lag1'] = pred
+            last_row['weight_lag3'] = last_row['weight_lag1'].values[0] if i > 2 else pred
+            last_row['weight_lag7'] = last_row['weight_lag1'].values[0] if i > 6 else pred
+        
+        current_weight = df['weight'].iloc[-1]
+        target_weight = predictions[-1]
+        change = target_weight - current_weight
+        
+        # توليد توصيات حسب الهدف الصحي
+        if self.user_health_goal == 'loss' and change > 0:
+            recommendation = self._t('⚠️ الوزن يتجه للزيادة رغم هدفك بالخسارة! حاول زيادة خطواتك اليومية بمقدار 2000 خطوة', 
+                                    '⚠️ Weight is increasing despite your loss goal! Try increasing your daily steps by 2000')
+        elif self.user_health_goal == 'gain' and change < 0:
+            recommendation = self._t('⚠️ الوزن يتجه للنقصان رغم هدفك بالزيادة! أضف وجبة خفيفة إضافية يومياً',
+                                    '⚠️ Weight is decreasing despite your gain goal! Add an extra snack daily')
+        else:
+            recommendation = self._t('استمر في تتبع عاداتك - أنت على الطريق الصحيح لهدفك!',
+                                    'Continue tracking your habits - you are on the right track for your goal!')
+        
+        return {
+            'status': 'success',
+            'current_weight': round(current_weight, 1),
+            'predicted_weight_2weeks': round(target_weight, 1),
+            'expected_change': round(change, 1),
+            'predictions': predictions[:7],
+            'recommendation': recommendation,
+            'health_goal': self.health_goal_text,
+            'confidence': round(model.score(X, y) * 100, 1) if hasattr(model, 'score') else 75
+        }
+    
+    def analyze_vital_signs_with_risk(self):
+        """
+        تحليل العلامات الحيوية مع تقييم المخاطر حسب عمر المستخدم وجنسه
+        """
+        latest = HealthStatus.objects.filter(user=self.user).order_by('-recorded_at').first()
+        
+        if not latest:
+            return {'status': 'no_data'}
+        
+        alerts = []
+        normal_ranges = self._get_normal_ranges_by_age()
+        
+        # تحليل ضغط الدم
+        if latest.systolic_pressure and latest.diastolic_pressure:
+            sys, dia = latest.systolic_pressure, latest.diastolic_pressure
+            
+            if sys > normal_ranges['systolic']['max'] or dia > normal_ranges['diastolic']['max']:
+                alerts.append({
+                    'type': 'blood_pressure',
+                    'severity': 'high',
+                    'icon': '❤️',
+                    'message': self._t('⚠️ ضغط الدم مرتفع', '⚠️ High blood pressure'),
+                    'advice': self._t('قلل الملح، زد البوتاسيوم (موز، خضروات)، واستشر طبيبك', 
+                                    'Reduce salt, increase potassium (bananas, vegetables), and consult your doctor'),
+                    'normal_range': f"{normal_ranges['systolic']['min']}-{normal_ranges['systolic']['max']}/{normal_ranges['diastolic']['min']}-{normal_ranges['diastolic']['max']}"
+                })
+            elif sys < normal_ranges['systolic']['min'] or dia < normal_ranges['diastolic']['min']:
+                alerts.append({
+                    'type': 'blood_pressure',
+                    'severity': 'low',
+                    'icon': '💙',
+                    'message': self._t('⚠️ ضغط الدم منخفض', '⚠️ Low blood pressure'),
+                    'advice': self._t('اشرب كمية كافية من الماء، وتناول وجبات صغيرة متكررة',
+                                    'Drink enough water, eat small frequent meals')
+                })
+        
+        # تحليل السكر (مع مراعاة العمر)
+        if latest.blood_glucose:
+            glucose = float(latest.blood_glucose)
+            glucose_range = normal_ranges['glucose']
+            
+            if glucose > glucose_range['max']:
+                alerts.append({
+                    'type': 'glucose',
+                    'severity': 'high',
+                    'icon': '🩸',
+                    'message': self._t('⚠️ سكر الدم مرتفع', '⚠️ High blood sugar'),
+                    'advice': self._t('قلل السكريات والكربوهيدرات البسيطة، ومارس رياضة المشي',
+                                    'Reduce sugars and simple carbs, walk for exercise'),
+                    'value': glucose,
+                    'normal_range': f"{glucose_range['min']}-{glucose_range['max']}"
+                })
+            elif glucose < glucose_range['min']:
+                alerts.append({
+                    'type': 'glucose',
+                    'severity': 'high',
+                    'icon': '🆘',
+                    'message': self._t('⚠️ سكر الدم منخفض جداً!', '⚠️ Very low blood sugar!'),
+                    'advice': self._t('تناول مصدر سكر سريع (تمر، عصير، عسل) فوراً',
+                                    'Eat a quick sugar source (dates, juice, honey) immediately')
+                })
+        
+        # تحليل الأكسجين
+        if latest.spo2 and latest.spo2 < 94:
+            alerts.append({
+                'type': 'oxygen',
+                'severity': 'high',
+                'icon': '🫁',
+                'message': self._t(f'⚠️ نسبة الأكسجين منخفضة: {latest.spo2}%', f'⚠️ Low oxygen level: {latest.spo2}%'),
+                'advice': self._t('تنفس بعمق، وإذا استمر الانخفاض استشر طبيبك',
+                                'Breathe deeply, if it persists consult your doctor')
+            })
+        
+        # تحليل درجة الحرارة
+        if latest.body_temperature:
+            temp = float(latest.body_temperature)
+            if temp > 37.5:
+                alerts.append({
+                    'type': 'temperature',
+                    'severity': 'medium',
+                    'icon': '🌡️',
+                    'message': self._t(f'⚠️ درجة حرارتك مرتفعة: {temp}°C', f'⚠️ Your temperature is high: {temp}°C'),
+                    'advice': self._t('ارح واستشر طبيبك إذا استمرت الأعراض', 'Rest and consult your doctor if symptoms persist')
+                })
+            elif temp < 36.0:
+                alerts.append({
+                    'type': 'temperature',
+                    'severity': 'medium',
+                    'icon': '❄️',
+                    'message': self._t(f'⚠️ درجة حرارتك منخفضة: {temp}°C', f'⚠️ Your temperature is low: {temp}°C'),
+                    'advice': self._t('تدفأ واشرب مشروبات دافئة', 'Keep warm and drink warm beverages')
+                })
+        
+        return {
+            'status': 'success',
+            'recorded_at': latest.recorded_at,
+            'alerts': alerts,
+            'risk_level': 'high' if len([a for a in alerts if a['severity'] == 'high']) > 0 else 'medium' if alerts else 'low',
+            'summary': self._t(f'تم اكتشاف {len(alerts)} تنبيه', f'Found {len(alerts)} alerts') if alerts else self._t('✅ جميع القياسات طبيعية', '✅ All measurements are normal')
+        }
+    
+    def _get_normal_ranges_by_age(self):
+        """الحصول على النطاقات الطبيعية حسب عمر المستخدم"""
+        if self.user_age and self.user_age > 60:
+            return {
+                'systolic': {'min': 90, 'max': 150},
+                'diastolic': {'min': 60, 'max': 90},
+                'glucose': {'min': 70, 'max': 140},
+                'heart_rate': {'min': 60, 'max': 100}
+            }
+        elif self.user_age and self.user_age < 18:
+            return {
+                'systolic': {'min': 90, 'max': 120},
+                'diastolic': {'min': 50, 'max': 80},
+                'glucose': {'min': 70, 'max': 140},
+                'heart_rate': {'min': 70, 'max': 110}
+            }
+        else:
+            return {
+                'systolic': {'min': 90, 'max': 130},
+                'diastolic': {'min': 60, 'max': 85},
+                'glucose': {'min': 70, 'max': 140},
+                'heart_rate': {'min': 60, 'max': 100}
+            }
+    
+    # ==========================================================================
+    # ✅ التحليل الكامل
+    # ==========================================================================
+    
+    def analyze_all(self):
+        """تحليل جميع الجوانب باستخدام خوارزميات ML مع بيانات المستخدم"""
+        return {
+            'user_profile_analysis': self.analyze_user_profile_health(),
+            'vital_signs_analysis': self.analyze_vital_signs_with_risk(),
+            'weight_prediction': self.predict_weight_trend_with_profile(),
+            'personalized_summary': self._generate_ai_summary(),
+        }
+    
+    def _generate_ai_summary(self):
+        """توليد ملخص ذكي شامل"""
+        summaries = []
+        
+        # ملخص الملف الشخصي
+        profile = self.analyze_user_profile_health()
+        
+        # رسالة ترحيب حسب العمر والجنس
+        greeting = self._t(
+            f'مرحباً {self.user.get_full_name() or self.user.username}!',
+            f'Hello {self.user.get_full_name() or self.user.username}!'
+        )
+        summaries.append(greeting)
+        
+        # ملخص BMI
+        if profile['bmi_analysis'].get('status') != 'no_data':
+            summaries.append(profile['bmi_analysis']['message'])
+            summaries.append(profile['bmi_analysis']['advice'])
+        
+        # ملخص الهدف الصحي
+        goal_alignment = profile['goal_alignment']
+        if not goal_alignment.get('aligned', True):
+            summaries.append(goal_alignment['message'])
+            if 'suggestion' in goal_alignment:
+                summaries.append(goal_alignment['suggestion'])
+        
+        # عوامل الخطر
+        for risk in profile['risk_factors']:
+            msg = risk['message_ar'] if self.is_arabic else risk['message_en']
+            summaries.append(msg)
+        
+        # التنبؤ بالوزن
+        weight_pred = self.predict_weight_trend_with_profile()
+        if weight_pred.get('status') == 'success':
+            summaries.append(weight_pred['recommendation'])
+        
+        # التوصيات المخصصة
+        for rec in profile['personalized_recommendations']:
+            summaries.append(f"{rec['icon']} {rec['advice']}")
+        
+        return {
+            'title': self._t('📋 خلاصة تحليلك الصحي', '📋 Your Health Analysis Summary'),
+            'bullet_points': summaries[:8],
+            'user_age': self.user_age,
+            'health_goal': self.health_goal_text
+        }
 
-class CrossInsightsService:
+
+# ==============================================================================
+# الخدمة الرئيسية
+# ==============================================================================
+
+class CrossInsightsMLService:
     """
-    خدمة التحليلات المتقاطعة الأساسية
-    Basic Cross-Insights Service
+    الخدمة الرئيسية للتحليلات المتقاطعة باستخدام ML مع بيانات المستخدم
     """
     
     def __init__(self, user):
         self.user = user
-        self.engine = HealthInsightsEngine(user)
+        self.engine = HealthInsightsEngineML(user)
     
-    def get_all_correlations(self):
-        """
-        جلب جميع الارتباطات والتحليلات
-        Get all correlations and analyses
-        """
+    def get_complete_analysis(self):
+        """الحصول على تحليل كامل وشامل"""
         try:
-            # استخدام المحرك الرئيسي للحصول على التحليلات
-            all_analyses = self.engine.analyze_all()
+            analysis = self.engine.analyze_all()
             
             return {
                 'success': True,
-                'correlations': {
-                    'vital_signs': all_analyses.get('vital_signs_analysis', {}),
-                    'activity_nutrition': all_analyses.get('activity_nutrition_correlation', {}),
-                    'sleep_mood': all_analyses.get('sleep_mood_correlation', {}),
-                    'weight_trends': all_analyses.get('weight_trend_analysis', {}),
-                    'blood_pressure': all_analyses.get('blood_pressure_insights', {}),
-                    'glucose_risk': all_analyses.get('glucose_risk_assessment', {}),
-                },
-                'insights': {
-                    'energy_consumption': all_analyses.get('energy_consumption_alert', {}),
-                    'pulse_pressure': all_analyses.get('pulse_pressure_analysis', {}),
-                    'pre_exercise': all_analyses.get('pre_exercise_recommendation', {}),
-                },
-                'recommendations': all_analyses.get('holistic_recommendations', []),
-                'alerts': all_analyses.get('predictive_alerts', []),
-                'timestamp': timezone.now().isoformat()
+                'is_arabic': self.engine.is_arabic,
+                'data': analysis,
+                'timestamp': timezone.now().isoformat(),
+                'user_name': self.user.get_full_name() or self.user.username
             }
-            
         except Exception as e:
             return {
                 'success': False,
                 'error': str(e),
-                'correlations': {},
-                'insights': {},
-                'recommendations': [],
-                'alerts': []
+                'message': 'حدث خطأ أثناء تحليل البيانات' if self.engine.is_arabic else 'An error occurred while analyzing data'
             }
-    
-    def get_vital_correlations(self):
-        """الحصول على ارتباطات العلامات الحيوية"""
-        analysis = self.engine.analyze_vital_signs()
-        return {
-            'vital_signs': analysis.get('vital_signs'),
-            'insights': analysis.get('insights', []),
-            'alerts': analysis.get('alerts', [])
-        }
-    
-    def get_lifestyle_correlations(self):
-        """الحصول على ارتباطات نمط الحياة"""
-        return {
-            'activity_nutrition': self.engine.analyze_activity_nutrition(),
-            'sleep_mood': self.engine.analyze_sleep_mood(),
-            'energy_balance': self.engine.analyze_energy_consumption()
-        }
-    
-    def get_risk_assessment(self):
-        """تقييم المخاطر الصحية"""
-        return {
-            'pre_exercise_risk': self.engine.analyze_pre_exercise_risk(),
-            'blood_pressure_risk': self.engine.analyze_blood_pressure(),
-            'glucose_risk': self.engine.analyze_glucose_risks(),
-            'pulse_pressure': self.engine.analyze_pulse_pressure()
-        }
+
+
+def get_health_insights(user, language='ar'):
+    """دالة مساعدة للحصول على التحليلات الصحية للمستخدم"""
+    service = CrossInsightsMLService(user)
+    service.engine.language = language
+    service.engine.is_arabic = language == 'ar'
+    return service.get_complete_analysis()
