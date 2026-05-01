@@ -6,7 +6,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.http import JsonResponse  
 from main.views import (
     # ✅ جميع الدوال المستوردة
-    scan_barcode, advanced_cross_insights, cross_insights, google_auth,
+    scan_barcode, google_auth,
     trigger_notifications, generate_notifications_now,
     push_subscribe,
     RegisterUserView,
@@ -27,6 +27,11 @@ from main.views import (
     search_medication, get_medication_details, get_user_medications,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
+        # ✅ دوال التحليلات الصحية الجديدة
+    health_dashboard,
+    get_health_analysis_api,
+    refresh_analysis,
+
     # ✅ دوال ESP32
     esp32_update_health_status,
     esp32_get_latest_health_status,
@@ -62,20 +67,24 @@ esp32_urls = [
     path('esp32/latest/', esp32_get_latest_health_status, name='esp32-latest'),
     path('esp32/history/', esp32_get_health_history, name='esp32-history'),
 ]
-
+# ✅ مسارات التحليلات الصحية الذكية (NEW)
+# =========================================================
+health_analytics_urls = [
+    # 📊 لوحة التحكم الصحية الرئيسية
+    path('health/dashboard/', health_dashboard, name='health_dashboard'),
+    
+    # 🤖 API التحليلات الصحية (AJAX)
+    path('health/analysis/api/', get_health_analysis_api, name='health_analysis_api'),
+    
+    # 🔄 تحديث التحليلات يدوياً
+    path('health/analysis/refresh/', refresh_analysis, name='health_analysis_refresh'),
+  
+]
 # =========================================================
 # ✅ المسارات الأساسية
 # =========================================================
 base_urls = [
-    # 🔐 مصادقة Google
-    path('auth/google/', google_auth, name='google_auth'), 
-    
-    # 🧠 التحليلات الذكية
-    path('advanced-insights/', advanced_cross_insights, name='advanced-insights'),
-    path('cross-insights/', cross_insights, name='cross-insights'),
-    path('analytics/smart-insights/', smart_insights, name='smart-insights'),
-    path('analytics/cross-insights/', cross_insights, name='cross-insights-alt'),
-    path('blood-sugar/', views.get_blood_sugar, name='blood-sugar'),
+ 
     
     # 🌤️ الطقس
     path('weather/', get_weather, name='weather'),
