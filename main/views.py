@@ -37,7 +37,6 @@ from .serializers import (
 from .services.nutrition_service import NutritionService
 from .services.weather_service import WeatherService
 from .services.exercise_service import AdvancedHealthAnalytics
-from .services.cross_insights_service import HealthInsightsEngine, CrossInsightsService
 from .services.habit_analytics_service import HabitAnalyticsService
 from .services.ai_chat_service import LlamaService
 from .services.sentiment_service import SentimentAnalyzer
@@ -889,36 +888,8 @@ def smart_insights(request):
     })
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def advanced_cross_insights(request):
-    """تحليلات متقاطعة متقدمة"""
-    try:
-        language = get_request_language(request)
-        engine = HealthInsightsEngine(request.user, language=language)
-        data = {
-            'energy_consumption': engine.analyze_energy_consumption(),
-            'pulse_pressure': engine.analyze_pulse_pressure(),
-            'pre_exercise': engine.analyze_pre_exercise_risk(),
-            'vital_signs': engine.analyze_vital_signs(),
-            'holistic': engine.generate_holistic_recommendations(),
-            'predictive': engine.generate_predictive_alerts()
-        }
-        return Response({'success': True, 'data': data})
-    except Exception as e:
-        return Response({'success': False, 'error': str(e)}, status=500)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def cross_insights(request):
-    """تحليلات متقاطعة أساسية"""
-    try:
-        service = CrossInsightsService(request.user)
-        insights = service.get_all_correlations()
-        return Response({'success': True, 'data': insights})
-    except Exception as e:
-        return Response({'success': False, 'error': str(e)}, status=500)
 
 
 # ==============================================================================
@@ -2088,3 +2059,53 @@ class MealViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """إضافة المستخدم تلقائياً عند إنشاء وجبة"""
         serializer.save(user=self.request.user)
+
+# views.py
+from django.shortcuts import render
+from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from main.services.cross_insights_service import get_health_insights
+import json
+
+@login_required
+def health_dashboard(request):
+    """
+    عرض لوحة التحكم الصحية
+    """
+    context = {
+        'page_title': 'لوحة التحليل الصحي الذكي',
+        'user_name': request.user.get_full_name() or request.user.username,
+    }
+    return render(request, 'health/dashboard.html', context)
+
+
+@login_required
+def get_health_analysis_api(request):
+    """
+    API لجلب التحليلات الصحية (AJAX)
+    """
+    language = request.GET.get('lang', 'ar')
+    result = get_health_insights(request.user, language=language)
+    
+    if result['success']:
+        return JsonResponse({
+            'success': True,
+            'data': result['data'],
+            'is_arabic': language == 'ar'
+        })
+    else:
+        return JsonResponse({
+            'success': False,
+            'error': result.get('error', 'حدث خطأ في التحليل'),
+            'message': result.get('message', '')
+        }, status=500)
+
+
+@login_required
+def refresh_analysis(request):
+    """
+    تحديث التحليلات (عادةً ما يتم تخزينها في cache)
+    """
+    # يمكنك إضافة منطق التخزين المؤقت هنا
+    return get_health_analysis_api(request)
