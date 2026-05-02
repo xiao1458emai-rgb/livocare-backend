@@ -39,7 +39,7 @@ from main.views import (
     analyze_sentiment_batch,analyze_with_context_api,get_mood_insights_api, quick_sentiment_api,
     health_dashboard, analyze_chat_message,public_analyze_sentiment,get_user_medical_records,get_medical_record_detail,
     get_health_analysis_api,delete_medical_record,
-    refresh_analysis,, get_user_chronic_conditions
+    refresh_analysis,get_user_chronic_conditions
     # ✅ دوال ESP32
     esp32_update_health_status,
     esp32_get_latest_health_status,
