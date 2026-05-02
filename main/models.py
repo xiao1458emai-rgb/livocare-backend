@@ -421,7 +421,29 @@ class MedicalRecord(models.Model):
     event_type = models.CharField(max_length=100, verbose_name="نوع الحدث") # مثال: عملية جراحية، إصابة رياضية
     event_date = models.DateField(verbose_name="تاريخ وقوع الحدث")
     details = models.TextField(verbose_name="وصف تفصيلي للحدث")
-    
+        # ✅ أضف هذا الحقل لرفع الملفات
+    uploaded_file = models.FileField(
+        upload_to='medical_records/%Y/%m/%d/',
+        null=True,
+        blank=True,
+        verbose_name="الملف المرفق (PDF/صورة)"
+    )
+    file_type = models.CharField(
+        max_length=20,
+        choices=[('pdf', 'PDF'), ('image', 'صورة'), ('unknown', 'غير معروف')],
+        default='unknown',
+        verbose_name="نوع الملف"
+    )
+    extracted_conditions = models.TextField(
+        null=True, 
+        blank=True,
+        verbose_name="الأمراض المستخرجة (JSON)"
+    )
+    processed_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        verbose_name="تاريخ المعالجة"
+    )
     class Meta:
         verbose_name = "سجل طبي"
         verbose_name_plural = "السجلات الطبية"

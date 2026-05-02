@@ -37,8 +37,8 @@ from main.views import (
     get_user_achievements, test_websocket, smart_insights,
     analyze_sentiment_text,
     analyze_sentiment_batch,analyze_with_context_api,get_mood_insights_api, quick_sentiment_api,
-    health_dashboard, analyze_chat_message,public_analyze_sentiment, get_user_chronic_conditions,
-    get_health_analysis_api,manage_chronic_conditions, delete_chronic_condition, manage_user_medications ,delete_user_medication,
+    health_dashboard, analyze_chat_message,public_analyze_sentiment, get_user_chronic_conditions,get_user_medical_records,get_medical_record_detail,
+    get_health_analysis_api,delete_medical_record,
     refresh_analysis,
     # ✅ دوال ESP32
     esp32_update_health_status,
@@ -100,12 +100,6 @@ base_urls = [
     # 🥗 التغذية والبحث عن الطعام
     path('food/search/', search_food, name='food-search'),
     
-   # main/urls.py - أضف هذه المسارات
-
-    path('user/conditions/', manage_chronic_conditions, name='user_conditions'),
-    path('user/conditions/<int:condition_id>/delete/', delete_chronic_condition, name='delete_condition'),
-    path('user/medications/', manage_user_medications, name='user_medications'),
-    path('user/medications/<int:med_id>/delete/', delete_user_medication, name='delete_medication'),
     
     # 😊 تحليل المشاعر
     path('sentiment/analyze/', analyze_sentiment, name='sentiment-analyze'),
@@ -230,6 +224,15 @@ sentiment_urls = [
     # تحليل عام بدون مصادقة
     path('sentiment/public/', public_analyze_sentiment, name='sentiment_public'),
 ]
+medical_urls = [
+    # 📄 السجلات الطبية
+    path('medical-records/', get_user_medical_records, name='medical_records_list'),
+    path('medical-records/<int:record_id>/', get_medical_record_detail, name='medical_record_detail'),
+    path('medical-records/<int:record_id>/delete/', delete_medical_record, name='medical_record_delete'),
+    
+    # 🤖 تحليل الملفات الطبية (بدون حفظ)
+    path('medical/analyze/', analyze_medical_file, name='analyze_medical_file'),
+]
 # =========================================================
 # ✅ دمج جميع المسارات (بدون مسارات مكررة)
 # =========================================================
@@ -242,6 +245,7 @@ urlpatterns = [
     *habit_analytics_urls,
     *sentiment_urls,
     *base_urls,
+    *medical_urls,
 ]
 
 # =========================================================

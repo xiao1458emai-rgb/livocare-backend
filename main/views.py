@@ -2836,120 +2836,571 @@ def public_analyze_sentiment(request):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-# main/views.py - أضف هذا الـ endpoint
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+
+# main/views.py - أضف هذه الدوال في نهاية الملف
+
+import json
+import PyPDF2
+import re
+from PIL import Image
+import pytesseract
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from django.utils import timezone
+from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
+from rest_framework import status, viewsets
+from django.db import transaction
+from .models import MedicalRecord, ChronicCondition
+from .serializers import MedicalRecordSerializer, ChronicConditionSerializer
+
+# =========================================================
+# ✅ دوال مساعدة لتحليل الملفات الطبية
+# =========================================================
+
+def extract_text_from_pdf(file_path):
+    """استخراج النص من ملف PDF"""
+    try:
+        text = ""
+        with open(file_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page in pdf_reader.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        return text
+    except Exception as e:
+        print(f"PDF extraction error: {e}")
+        return ""
+
+def extract_text_from_image(file_path):
+    """استخراج النص من صورة باستخدام OCR"""
+    try:
+        image = Image.open(file_path)
+        # محاولة بالعربية أولاً ثم الإنجليزية
+        text_arabic = pytesseract.image_to_string(image, lang='ara')
+        text_english = pytesseract.image_to_string(image, lang='eng')
+        return text_arabic + "\n" + text_english
+    except Exception as e:
+        print(f"Image OCR error: {e}")
+        return ""
+
+def get_disease_arabic_name(disease_en):
+    """تحويل اسم المرض من إنجليزي إلى عربي"""
+    names = {
+        'diabetes': 'السكري',
+        'hypertension': 'ارتفاع ضغط الدم',
+        'asthma': 'الربو',
+        'heart_disease': 'أمراض القلب',
+        'arthritis': 'التهاب المفاصل',
+        'thyroid': 'أمراض الغدة الدرقية',
+        'anemia': 'فقر الدم',
+        'migraine': 'الصداع النصفي',
+        'allergy': 'الحساسية',
+        'depression': 'الاكتئاب',
+        'anxiety': 'اضطراب القلق',
+        'obesity': 'السمنة',
+        'kidney_disease': 'أمراض الكلى',
+        'liver_disease': 'أمراض الكبد',
+        'cancer': 'السرطان',
+        'copd': 'مرض الانسداد الرئوي المزمن',
+        'osteoporosis': 'هشاشة العظام',
+        'psoriasis': 'الصدفية',
+        'ibd': 'أمراض الأمعاء الالتهابية',
+        'epilepsy': 'الصرع'
+    }
+    return names.get(disease_en.lower(), disease_en.capitalize())
+
+def extract_diseases_from_text(text):
+    """استخراج الأمراض من النص باستخدام Regex + Keywords"""
+    if not text or not text.strip():
+        return {'diseases': [], 'raw_text': '', 'confidence': 'low'}
+    
+    # قائمة بأسماء الأمراض الشائعة مع المفاتيح
+    disease_keywords = {
+        'diabetes': ['سكري', 'diabetes', 'diabetic', 'type 1', 'type 2', 'sugar', 'سكر'],
+        'hypertension': ['ضغط', 'hypertension', 'high blood pressure', 'hypertensive', 'ارتفاع ضغط'],
+        'asthma': ['ربو', 'asthma', 'bronchial', 'azma'],
+        'heart_disease': ['قلب', 'heart', 'cardiac', 'cardiovascular', 'coronary', 'angina'],
+        'arthritis': ['التهاب مفاصل', 'arthritis', 'rheumatoid', 'osteoarthritis', 'rheumatic'],
+        'thyroid': ['غدة درقية', 'thyroid', 'hypothyroidism', 'hyperthyroidism', 'thyroiditis'],
+        'anemia': ['أنيميا', 'anemia', 'فقر دم', 'hemoglobin'],
+        'migraine': ['صداع نصفي', 'migraine', 'شقيقة', 'headache chronic'],
+        'allergy': ['حساسية', 'allergy', 'allergic', 'hay fever'],
+        'depression': ['اكتئاب', 'depression', 'depressive', 'major depression'],
+        'anxiety': ['قلق', 'anxiety', 'anxious', 'panic disorder'],
+        'obesity': ['سمنة', 'obesity', 'overweight', 'obese'],
+        'kidney_disease': ['كلية', 'kidney', 'renal', 'ckd', 'kidney failure'],
+        'liver_disease': ['كبد', 'liver', 'hepatic', 'cirrhosis', 'hepatitis'],
+        'cancer': ['سرطان', 'cancer', 'tumor', 'malignant', 'carcinoma'],
+        'copd': ['copd', 'chronic obstructive', 'انسداد رئوي', 'bronchitis chronic'],
+        'osteoporosis': ['هشاشة', 'osteoporosis', 'bone density', 'osteopenia'],
+        'psoriasis': ['صدفية', 'psoriasis', 'plaque psoriasis'],
+        'epilepsy': ['صرع', 'epilepsy', 'seizure', 'epileptic']
+    }
+    
+    # أنماط Regex إضافية
+    disease_patterns = [
+        r'(?:تشخيص|diagnosis|يعاني من|suffers from|مصاب بـ|has)\s*:?\s*([^،\n.]+)',
+        r'(?:مرض|condition|disorder|disease)\s+([^،\n.]+)',
+        r'diagnosed with\s+([^\.]+)',
+        r'([^،\n]+)(?:مرض|اعراض)'
+    ]
+    
+    found_diseases = []
+    text_lower = text.lower()
+    
+    # البحث بالكلمات المفتاحية
+    for disease_en, keywords in disease_keywords.items():
+        for keyword in keywords:
+            if keyword.lower() in text_lower:
+                # البحث عن السياق للحصول على اسم أكثر دقة
+                context_pattern = rf'[^\.]*{keyword}[^\.]*\.'
+                context_matches = re.findall(context_pattern, text_lower, re.IGNORECASE)
+                context = context_matches[0] if context_matches else ''
+                
+                found_diseases.append({
+                    'name': get_disease_arabic_name(disease_en),
+                    'name_en': disease_en,
+                    'confidence': 'high',
+                    'context': context[:200] if context else ''
+                })
+                break
+    
+    # البحث بـ Regex
+    for pattern in disease_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE | re.UNICODE)
+        for match in matches:
+            clean_match = match.strip()
+            # تنظيف النص
+            clean_match = re.sub(r'[،;:\(\)\[\]]', '', clean_match)
+            clean_match = clean_match.split('،')[0].split('.')[0].strip()
+            
+            if 3 < len(clean_match) < 100 and clean_match not in [d['name'] for d in found_diseases]:
+                found_diseases.append({
+                    'name': clean_match,
+                    'name_en': '',
+                    'confidence': 'medium',
+                    'context': ''
+                })
+    
+    # إزالة التكرارات والحفاظ على الأعلى ثقة
+    unique_diseases = []
+    seen_names = set()
+    for disease in found_diseases:
+        name_key = disease['name'].lower()
+        if name_key not in seen_names:
+            seen_names.add(name_key)
+            unique_diseases.append(disease)
+    
+    return {
+        'diseases': unique_diseases[:15],  # حد أقصى 15 مرض
+        'raw_text': text[:3000],  # حفظ أول 3000 حرف كعينة
+        'confidence': 'high' if len(unique_diseases) > 0 else 'low'
+    }
+
+
+# =========================================================
+# ✅ ViewSet للسجلات الطبية مع معالجة PDF
+# =========================================================
+
+class MedicalRecordViewSet(viewsets.ModelViewSet):
+    """ViewSet للسجلات الطبية مع إمكانية رفع وتحليل PDF"""
+    serializer_class = MedicalRecordSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return MedicalRecord.objects.filter(user=self.request.user).order_by('-event_date')
+    
+    @action(detail=False, methods=['POST'], url_path='upload-and-process')
+    def upload_and_process(self, request):
+        """
+        رفع ملف PDF أو صورة وتحليله لاستخراج الأمراض
+        """
+        user = request.user
+        uploaded_file = request.FILES.get('file')
+        event_type = request.data.get('event_type')
+        event_date = request.data.get('event_date')
+        details = request.data.get('details', '')
+        
+        # التحقق من صحة المدخلات
+        if not uploaded_file:
+            return Response({
+                'success': False,
+                'error': 'لم يتم رفع أي ملف'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not event_type:
+            return Response({
+                'success': False,
+                'error': 'نوع السجل مطلوب'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not event_date:
+            return Response({
+                'success': False,
+                'error': 'تاريخ السجل مطلوب'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # تحديد نوع الملف
+        file_name = uploaded_file.name.lower()
+        file_type = "unknown"
+        if file_name.endswith('.pdf'):
+            file_type = "pdf"
+        elif file_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
+            file_type = "image"
+        else:
+            return Response({
+                'success': False,
+                'error': 'نوع الملف غير مدعوم. يرجى رفع PDF أو صورة'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            with transaction.atomic():
+                # حفظ الملف
+                medical_record = MedicalRecord.objects.create(
+                    user=user,
+                    event_type=event_type,
+                    event_date=event_date,
+                    details=details,
+                    uploaded_file=uploaded_file,
+                    file_type=file_type,
+                    processed_at=timezone.now()
+                )
+                
+                # معالجة الملف واستخراج النص
+                extracted_text = ""
+                file_path = medical_record.uploaded_file.path
+                
+                if file_type == "pdf":
+                    extracted_text = extract_text_from_pdf(file_path)
+                elif file_type == "image":
+                    extracted_text = extract_text_from_image(file_path)
+                
+                # استخراج الأمراض من النص
+                extracted_conditions = extract_diseases_from_text(extracted_text)
+                
+                # حفظ الأمراض المستخرجة
+                medical_record.extracted_conditions = json.dumps(extracted_conditions, ensure_ascii=False)
+                medical_record.save()
+                
+                # إضافة الأمراض المستخرجة تلقائياً
+                added_conditions = []
+                for disease in extracted_conditions.get('diseases', []):
+                    condition_name = disease['name']
+                    
+                    # التحقق من عدم وجود المرض مسبقاً
+                    condition, created = ChronicCondition.objects.get_or_create(
+                        user=user,
+                        name=condition_name,
+                        defaults={
+                            'diagnosis_date': event_date,
+                            'is_active': True,
+                            'medications': disease.get('context', '')
+                        }
+                    )
+                    added_conditions.append({
+                        'id': condition.id,
+                        'name': condition.name,
+                        'created': created,
+                        'diagnosis_date': condition.diagnosis_date
+                    })
+                
+                serializer = self.get_serializer(medical_record)
+                
+                return Response({
+                    'success': True,
+                    'medical_record': serializer.data,
+                    'extracted_text_preview': extracted_text[:500] + '...' if len(extracted_text) > 500 else extracted_text,
+                    'extracted_conditions': extracted_conditions,
+                    'added_conditions': added_conditions,
+                    'message': f'✅ تم رفع الملف واستخراج {len(added_conditions)} مرض بنجاح'
+                }, status=status.HTTP_201_CREATED)
+                
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'حدث خطأ أثناء معالجة الملف: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['POST'], url_path='reprocess')
+    def reprocess(self, request, pk=None):
+        """إعادة معالجة ملف السجل الطبي"""
+        medical_record = self.get_object()
+        
+        if not medical_record.uploaded_file:
+            return Response({
+                'success': False,
+                'error': 'لا يوجد ملف مرفق للمعالجة'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # استخراج النص حسب نوع الملف
+            file_path = medical_record.uploaded_file.path
+            extracted_text = ""
+            
+            if medical_record.file_type == 'pdf':
+                extracted_text = extract_text_from_pdf(file_path)
+            elif medical_record.file_type == 'image':
+                extracted_text = extract_text_from_image(file_path)
+            
+            # إعادة استخراج الأمراض
+            extracted_conditions = extract_diseases_from_text(extracted_text)
+            
+            # تحديث السجل
+            medical_record.extracted_conditions = json.dumps(extracted_conditions, ensure_ascii=False)
+            medical_record.processed_at = timezone.now()
+            medical_record.save()
+            
+            # إضافة الأمراض الجديدة فقط
+            user = request.user
+            added_conditions = []
+            
+            for disease in extracted_conditions.get('diseases', []):
+                condition_name = disease['name']
+                condition, created = ChronicCondition.objects.get_or_create(
+                    user=user,
+                    name=condition_name,
+                    defaults={
+                        'diagnosis_date': medical_record.event_date,
+                        'is_active': True
+                    }
+                )
+                if created:
+                    added_conditions.append(condition.name)
+            
+            return Response({
+                'success': True,
+                'extracted_conditions': extracted_conditions,
+                'new_conditions_added': added_conditions,
+                'message': f'✅ تمت إعادة المعالجة وإضافة {len(added_conditions)} مرض جديد'
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'خطأ في إعادة المعالجة: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['POST'], url_path='import-conditions')
+    def import_conditions(self, request, pk=None):
+        """استيراد الأمراض المستخرجة إلى قائمة الأمراض المزمنة"""
+        medical_record = self.get_object()
+        
+        if not medical_record.extracted_conditions:
+            return Response({
+                'success': False,
+                'error': 'لا توجد أمراض مستخرجة من هذا السجل'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            extracted = json.loads(medical_record.extracted_conditions)
+            user = request.user
+            added_conditions = []
+            skipped_conditions = []
+            
+            for disease in extracted.get('diseases', []):
+                condition_name = disease['name']
+                condition, created = ChronicCondition.objects.get_or_create(
+                    user=user,
+                    name=condition_name,
+                    defaults={
+                        'diagnosis_date': medical_record.event_date,
+                        'is_active': True,
+                        'medications': disease.get('context', '')
+                    }
+                )
+                if created:
+                    added_conditions.append(condition_name)
+                else:
+                    skipped_conditions.append(condition_name)
+            
+            return Response({
+                'success': True,
+                'added_conditions': added_conditions,
+                'skipped_conditions': skipped_conditions,
+                'message': f'✅ تم استيراد {len(added_conditions)} مرض، تخطي {len(skipped_conditions)} مرض موجود مسبقاً'
+            })
+            
+        except Exception as e:
+            return Response({
+                'success': False,
+                'error': f'خطأ في استيراد الأمراض: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =========================================================
+# ✅ ChronicCondition ViewSet محسن
+# =========================================================
+
+class ChronicConditionViewSet(viewsets.ModelViewSet):
+    """ViewSet للأمراض المزمنة"""
+    serializer_class = ChronicConditionSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return ChronicCondition.objects.filter(user=self.request.user).order_by('-diagnosis_date', 'name')
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+    
+    @action(detail=False, methods=['GET'], url_path='summary')
+    def get_summary(self, request):
+        """الحصول على ملخص الأمراض المزمنة"""
+        user = request.user
+        conditions = self.get_queryset()
+        
+        active_count = conditions.filter(is_active=True).count()
+        total_count = conditions.count()
+        
+        # إحصائيات حسب نوع المرض (تقريبية)
+        disease_categories = {
+            'metabolic': ['السكري', 'ارتفاع ضغط الدم', 'سمنة', 'thyroid', 'diabetes', 'hypertension'],
+            'respiratory': ['ربو', 'copd', 'asthma'],
+            'cardiac': ['قلب', 'heart'],
+            'neurological': ['صداع نصفي', 'صرع', 'migraine', 'epilepsy'],
+            'mental': ['اكتئاب', 'قلق', 'depression', 'anxiety']
+        }
+        
+        category_counts = {cat: 0 for cat in disease_categories.keys()}
+        for condition in conditions:
+            condition_lower = condition.name.lower()
+            for category, keywords in disease_categories.items():
+                if any(keyword.lower() in condition_lower for keyword in keywords):
+                    category_counts[category] += 1
+                    break
+        
+        return Response({
+            'success': True,
+            'total_count': total_count,
+            'active_count': active_count,
+            'inactive_count': total_count - active_count,
+            'categories': category_counts,
+            'recent_conditions': ChronicConditionSerializer(conditions[:5], many=True).data
+        })
+
+
+# =========================================================
+# ✅ دوال API إضافية للسجلات الطبية
+# =========================================================
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def get_user_chronic_conditions(request):
-    """جلب الأمراض المزمنة للمستخدم"""
+def get_user_medical_records(request):
+    """الحصول على جميع السجلات الطبية للمستخدم"""
+    records = MedicalRecord.objects.filter(user=request.user).order_by('-event_date')
+    serializer = MedicalRecordSerializer(records, many=True)
+    return Response({
+        'success': True,
+        'count': records.count(),
+        'records': serializer.data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_medical_record_detail(request, record_id):
+    """الحصول على تفاصيل سجل طبي محدد"""
     try:
-        from main.models import ChronicCondition
-        conditions = ChronicCondition.objects.filter(user=request.user, is_active=True)
-        data = [{'id': c.id, 'name': c.name, 'diagnosis_date': c.diagnosis_date} for c in conditions]
-        return Response({'success': True, 'conditions': data})
+        record = MedicalRecord.objects.get(id=record_id, user=request.user)
+        serializer = MedicalRecordSerializer(record)
+        
+        # إضافة الأمراض المستخرجة بشكل منسق
+        extracted = {}
+        if record.extracted_conditions:
+            extracted = json.loads(record.extracted_conditions)
+        
+        return Response({
+            'success': True,
+            'record': serializer.data,
+            'extracted_diseases': extracted.get('diseases', []),
+            'analysis_available': bool(record.extracted_conditions)
+        })
+    except MedicalRecord.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'السجل الطبي غير موجود'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_medical_record(request, record_id):
+    """حذف سجل طبي مع ملفه المرفق"""
+    try:
+        record = MedicalRecord.objects.get(id=record_id, user=request.user)
+        
+        # حذف الملف المرفق
+        if record.uploaded_file:
+            record.uploaded_file.delete()
+        
+        record.delete()
+        return Response({
+            'success': True,
+            'message': 'تم حذف السجل الطبي بنجاح'
+        })
+    except MedicalRecord.DoesNotExist:
+        return Response({
+            'success': False,
+            'error': 'السجل الطبي غير موجود'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+# =========================================================
+# ✅ دالة تحليل الملف الطبي بدون حفظ (API عام)
+# =========================================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def analyze_medical_file(request):
+    """
+    تحليل ملف طبي (PDF/صورة) واستخراج الأمراض بدون حفظ في قاعدة البيانات
+    يمكن استخدامها للمعاينة قبل الإضافة
+    """
+    uploaded_file = request.FILES.get('file')
+    
+    if not uploaded_file:
+        return Response({
+            'success': False,
+            'error': 'لم يتم رفع أي ملف'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # تحديد نوع الملف
+    file_name = uploaded_file.name.lower()
+    if not (file_name.endswith('.pdf') or file_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))):
+        return Response({
+            'success': False,
+            'error': 'نوع الملف غير مدعوم. يرجى رفع PDF أو صورة'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # حفظ مؤقت
+        temp_path = default_storage.save(f'temp/{uploaded_file.name}', ContentFile(uploaded_file.read()))
+        full_path = default_storage.path(temp_path)
+        
+        # استخراج النص
+        extracted_text = ""
+        if file_name.endswith('.pdf'):
+            extracted_text = extract_text_from_pdf(full_path)
+        else:
+            extracted_text = extract_text_from_image(full_path)
+        
+        # استخراج الأمراض
+        extracted_conditions = extract_diseases_from_text(extracted_text)
+        
+        # حذف الملف المؤقت
+        default_storage.delete(temp_path)
+        
+        return Response({
+            'success': True,
+            'extracted_conditions': extracted_conditions,
+            'text_preview': extracted_text[:1000] if extracted_text else '',
+            'has_text': bool(extracted_text)
+        })
+        
     except Exception as e:
-        return Response({'success': False, 'error': str(e), 'conditions': []})
-# main/views.py - أضف هذه الدوال
-
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from main.models import ChronicCondition, UserMedication, Medication
-
-@api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
-def manage_chronic_conditions(request):
-    """إدارة الأمراض المزمنة للمستخدم"""
-    if request.method == 'GET':
-        conditions = ChronicCondition.objects.filter(user=request.user, is_active=True)
-        data = [{'id': c.id, 'name': c.name, 'diagnosis_date': c.diagnosis_date, 'medications': c.medications} for c in conditions]
-        return Response({'success': True, 'conditions': data})
-    
-    elif request.method == 'POST':
-        name = request.data.get('name')
-        diagnosis_date = request.data.get('diagnosis_date')
-        medications = request.data.get('medications', '')
-        
-        if not name:
-            return Response({'success': False, 'error': 'اسم المرض مطلوب'}, status=400)
-        
-        condition = ChronicCondition.objects.create(
-            user=request.user,
-            name=name,
-            diagnosis_date=diagnosis_date,
-            medications=medications,
-            is_active=True
-        )
-        return Response({'success': True, 'condition': {'id': condition.id, 'name': condition.name}})
-
-
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def delete_chronic_condition(request, condition_id):
-    """حذف مرض مزمن"""
-    try:
-        condition = ChronicCondition.objects.get(id=condition_id, user=request.user)
-        condition.delete()
-        return Response({'success': True})
-    except ChronicCondition.DoesNotExist:
-        return Response({'success': False, 'error': 'المرض غير موجود'}, status=404)
-
-
-@api_view(['GET', 'POST'])
-@permission_classes([IsAuthenticated])
-def manage_user_medications(request):
-    """إدارة الأدوية الحالية للمستخدم"""
-    if request.method == 'GET':
-        user_meds = UserMedication.objects.filter(user=request.user).select_related('medication')
-        data = []
-        for um in user_meds:
-            data.append({
-                'id': um.id,
-                'medication_id': um.medication.id,
-                'name': um.medication.brand_name,
-                'dosage': um.dosage,
-                'frequency': um.frequency,
-                'start_date': um.start_date,
-                'notes': um.notes
-            })
-        return Response({'success': True, 'medications': data})
-    
-    elif request.method == 'POST':
-        medication_name = request.data.get('name')
-        dosage = request.data.get('dosage', '')
-        frequency = request.data.get('frequency', '')
-        start_date = request.data.get('start_date')
-        
-        if not medication_name:
-            return Response({'success': False, 'error': 'اسم الدواء مطلوب'}, status=400)
-        
-        # البحث عن الدواء أو إنشاؤه
-        medication, _ = Medication.objects.get_or_create(
-            brand_name=medication_name,
-            defaults={'generic_name': medication_name}
-        )
-        
-        user_med = UserMedication.objects.create(
-            user=request.user,
-            medication=medication,
-            dosage=dosage,
-            frequency=frequency,
-            start_date=start_date or timezone.now().date()
-        )
-        
-        return Response({'success': True, 'medication': {'id': user_med.id, 'name': medication.brand_name}})
-
-
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def delete_user_medication(request, med_id):
-    """حذف دواء من قائمة الأدوية الحالية"""
-    try:
-        user_med = UserMedication.objects.get(id=med_id, user=request.user)
-        user_med.delete()
-        return Response({'success': True})
-    except UserMedication.DoesNotExist:
-        return Response({'success': False, 'error': 'الدواء غير موجود'}, status=404)
+        return Response({
+            'success': False,
+            'error': f'خطأ في تحليل الملف: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
