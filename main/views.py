@@ -2852,3 +2852,104 @@ def get_user_chronic_conditions(request):
         return Response({'success': True, 'conditions': data})
     except Exception as e:
         return Response({'success': False, 'error': str(e), 'conditions': []})
+# main/views.py - أضف هذه الدوال
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from main.models import ChronicCondition, UserMedication, Medication
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def manage_chronic_conditions(request):
+    """إدارة الأمراض المزمنة للمستخدم"""
+    if request.method == 'GET':
+        conditions = ChronicCondition.objects.filter(user=request.user, is_active=True)
+        data = [{'id': c.id, 'name': c.name, 'diagnosis_date': c.diagnosis_date, 'medications': c.medications} for c in conditions]
+        return Response({'success': True, 'conditions': data})
+    
+    elif request.method == 'POST':
+        name = request.data.get('name')
+        diagnosis_date = request.data.get('diagnosis_date')
+        medications = request.data.get('medications', '')
+        
+        if not name:
+            return Response({'success': False, 'error': 'اسم المرض مطلوب'}, status=400)
+        
+        condition = ChronicCondition.objects.create(
+            user=request.user,
+            name=name,
+            diagnosis_date=diagnosis_date,
+            medications=medications,
+            is_active=True
+        )
+        return Response({'success': True, 'condition': {'id': condition.id, 'name': condition.name}})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_chronic_condition(request, condition_id):
+    """حذف مرض مزمن"""
+    try:
+        condition = ChronicCondition.objects.get(id=condition_id, user=request.user)
+        condition.delete()
+        return Response({'success': True})
+    except ChronicCondition.DoesNotExist:
+        return Response({'success': False, 'error': 'المرض غير موجود'}, status=404)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def manage_user_medications(request):
+    """إدارة الأدوية الحالية للمستخدم"""
+    if request.method == 'GET':
+        user_meds = UserMedication.objects.filter(user=request.user).select_related('medication')
+        data = []
+        for um in user_meds:
+            data.append({
+                'id': um.id,
+                'medication_id': um.medication.id,
+                'name': um.medication.brand_name,
+                'dosage': um.dosage,
+                'frequency': um.frequency,
+                'start_date': um.start_date,
+                'notes': um.notes
+            })
+        return Response({'success': True, 'medications': data})
+    
+    elif request.method == 'POST':
+        medication_name = request.data.get('name')
+        dosage = request.data.get('dosage', '')
+        frequency = request.data.get('frequency', '')
+        start_date = request.data.get('start_date')
+        
+        if not medication_name:
+            return Response({'success': False, 'error': 'اسم الدواء مطلوب'}, status=400)
+        
+        # البحث عن الدواء أو إنشاؤه
+        medication, _ = Medication.objects.get_or_create(
+            brand_name=medication_name,
+            defaults={'generic_name': medication_name}
+        )
+        
+        user_med = UserMedication.objects.create(
+            user=request.user,
+            medication=medication,
+            dosage=dosage,
+            frequency=frequency,
+            start_date=start_date or timezone.now().date()
+        )
+        
+        return Response({'success': True, 'medication': {'id': user_med.id, 'name': medication.brand_name}})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_user_medication(request, med_id):
+    """حذف دواء من قائمة الأدوية الحالية"""
+    try:
+        user_med = UserMedication.objects.get(id=med_id, user=request.user)
+        user_med.delete()
+        return Response({'success': True})
+    except UserMedication.DoesNotExist:
+        return Response({'success': False, 'error': 'الدواء غير موجود'}, status=404)
