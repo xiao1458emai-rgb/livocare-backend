@@ -2175,24 +2175,327 @@ def comprehensive_health_analytics_view(request):
     }
     return render(request, 'health/comprehensive_analytics.html', context)
 
+# main/views.py - استبدل دالة get_comprehensive_analytics_api بالكامل بهذه النسخة
 
-# مثال للدالة get_comprehensive_analytics_api
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.utils import timezone
+from datetime import timedelta
+from django.db.models import Count, Sum, Q, Avg
+from django.contrib.auth import get_user_model
+import logging
+
+logger = logging.getLogger(__name__)
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_comprehensive_analytics_api(request):
-    language = request.GET.get('lang', 'ar')
+    """
+    API للتحليلات الصحية الشاملة - نسخة مستقرة
+    """
     try:
-        analytics_engine = get_comprehensive_health_analytics(request.user, language=language)
-        return Response({
+        user = request.user
+        lang = request.GET.get('lang', 'en')
+        is_arabic = lang == 'ar'
+        
+        # ✅ التحقق من وجود النماذج
+        try:
+            from .models import PhysicalActivity, Sleep, HealthStatus, HabitLog, HabitDefinition, Meal, MoodEntry
+        except ImportError as e:
+            logger.error(f"Import error: {e}")
+            return Response({
+                'success': False,
+                'error': 'Model import error',
+                'message': 'خطأ في تحميل النماذج' if is_arabic else 'Model loading error'
+            }, status=500)
+        
+        # ✅ تحديد الفترة الزمنية (آخر 30 يوم)
+        today = timezone.now().date()
+        thirty_days_ago = today - timedelta(days=30)
+        week_ago = today - timedelta(days=7)
+        
+        # ✅ جلب البيانات بأمان (مع try-except لكل نموذج)
+        analytics_data = {
             'success': True,
-            'data': analytics_engine,
-            'is_arabic': language == 'ar'
-        })
+            'data': {
+                'period': {
+                    'start': thirty_days_ago.isoformat(),
+                    'end': today.isoformat(),
+                    'days': 30
+                },
+                'summary': {
+                    'total_activities': 0,
+                    'total_sleep_hours': 0,
+                    'avg_sleep_hours': 0,
+                    'avg_weight': 0,
+                    'avg_bmi': 0,
+                    'habit_completion_rate': 0,
+                    'total_meals': 0,
+                    'avg_calories': 0,
+                    'avg_mood': 0,
+                    'has_data': False
+                },
+                'personalized_recommendations': [],
+                'trends': {},
+                'charts': {
+                    'sleep': [],
+                    'activities': [],
+                    'weight': [],
+                    'habits': [],
+                    'mood': []
+                }
+            }
+        }
+        
+        has_any_data = False
+        
+        # ========== 1. النشاط البدني ==========
+        try:
+            activities = PhysicalActivity.objects.filter(
+                user=user,
+                start_time__date__gte=thirty_days_ago
+            )
+            activities_count = activities.count()
+            if activities_count > 0:
+                has_any_data = True
+                analytics_data['data']['summary']['total_activities'] = activities_count
+                
+                # إحصائيات النشاطات
+                total_duration = activities.aggregate(
+                    total=Sum('duration_minutes')
+                )['total'] or 0
+                avg_duration = total_duration / activities_count if activities_count > 0 else 0
+                
+                analytics_data['data']['summary']['avg_activity_duration'] = round(avg_duration, 1)
+                
+                # بيانات الرسم البياني
+                for activity in activities.order_by('start_time')[:10]:
+                    analytics_data['data']['charts']['activities'].append({
+                        'date': activity.start_time.date().isoformat(),
+                        'duration': activity.duration_minutes,
+                        'type': activity.activity_type
+                    })
+        except Exception as e:
+            logger.error(f"Activity error: {e}")
+        
+        # ========== 2. النوم ==========
+        try:
+            sleep_records = Sleep.objects.filter(
+                user=user,
+                sleep_start__date__gte=thirty_days_ago
+            )
+            sleep_count = sleep_records.count()
+            if sleep_count > 0:
+                has_any_data = True
+                total_sleep = 0
+                for sleep in sleep_records:
+                    if sleep.sleep_end and sleep.sleep_start:
+                        duration = (sleep.sleep_end - sleep.sleep_start).total_seconds() / 3600
+                        if 0 < duration < 24:  # تصفية القيم غير المنطقية
+                            total_sleep += duration
+                            analytics_data['data']['charts']['sleep'].append({
+                                'date': sleep.sleep_start.date().isoformat(),
+                                'hours': round(duration, 1)
+                            })
+                
+                avg_sleep = total_sleep / sleep_count if sleep_count > 0 else 0
+                analytics_data['data']['summary']['total_sleep_hours'] = round(total_sleep, 1)
+                analytics_data['data']['summary']['avg_sleep_hours'] = round(avg_sleep, 1)
+        except Exception as e:
+            logger.error(f"Sleep error: {e}")
+        
+        # ========== 3. الوزن ومؤشر كتلة الجسم ==========
+        try:
+            health_records = HealthStatus.objects.filter(
+                user=user,
+                recorded_at__date__gte=thirty_days_ago
+            ).order_by('-recorded_at')
+            
+            if health_records.exists():
+                has_any_data = True
+                latest = health_records.first()
+                analytics_data['data']['summary']['latest_weight'] = float(latest.weight_kg) if latest.weight_kg else None
+                analytics_data['data']['summary']['latest_bmi'] = float(latest.bmi) if latest.bmi else None
+                
+                # بيانات الرسم البياني للوزن
+                for record in health_records[:30]:
+                    if record.weight_kg:
+                        analytics_data['data']['charts']['weight'].append({
+                            'date': record.recorded_at.date().isoformat(),
+                            'weight': float(record.weight_kg)
+                        })
+        except Exception as e:
+            logger.error(f"Health status error: {e}")
+        
+        # ========== 4. العادات ==========
+        try:
+            habit_logs = HabitLog.objects.filter(
+                habit__user=user,
+                log_date__gte=thirty_days_ago
+            )
+            habit_count = habit_logs.count()
+            if habit_count > 0:
+                has_any_data = True
+                completed_count = habit_logs.filter(is_completed=True).count()
+                completion_rate = (completed_count / habit_count) * 100 if habit_count > 0 else 0
+                analytics_data['data']['summary']['habit_completion_rate'] = round(completion_rate, 1)
+                
+                # بيانات الرسم البياني
+                from collections import defaultdict
+                daily_completion = defaultdict(lambda: {'total': 0, 'completed': 0})
+                for log in habit_logs:
+                    date_str = log.log_date.isoformat()
+                    daily_completion[date_str]['total'] += 1
+                    if log.is_completed:
+                        daily_completion[date_str]['completed'] += 1
+                
+                for date_str, stats in list(daily_completion.items())[:30]:
+                    rate = (stats['completed'] / stats['total']) * 100 if stats['total'] > 0 else 0
+                    analytics_data['data']['charts']['habits'].append({
+                        'date': date_str,
+                        'rate': round(rate, 1)
+                    })
+        except Exception as e:
+            logger.error(f"Habits error: {e}")
+        
+        # ========== 5. الوجبات ==========
+        try:
+            meals = Meal.objects.filter(
+                user=user,
+                meal_time__date__gte=thirty_days_ago
+            )
+            meal_count = meals.count()
+            if meal_count > 0:
+                has_any_data = True
+                total_calories = meals.aggregate(
+                    total=Sum('total_calories')
+                )['total'] or 0
+                avg_calories = total_calories / meal_count if meal_count > 0 else 0
+                analytics_data['data']['summary']['total_meals'] = meal_count
+                analytics_data['data']['summary']['avg_calories'] = round(avg_calories, 1)
+        except Exception as e:
+            logger.error(f"Meals error: {e}")
+        
+        # ========== 6. المزاج ==========
+        try:
+            mood_logs = MoodEntry.objects.filter(
+                user=user,
+                entry_time__date__gte=thirty_days_ago
+            )
+            mood_count = mood_logs.count()
+            if mood_count > 0:
+                has_any_data = True
+                mood_scores = []
+                mood_map = {
+                    'Excellent': 5, 'Good': 4, 'Neutral': 3,
+                    'Stressed': 2, 'Anxious': 2, 'Sad': 1
+                }
+                for mood in mood_logs:
+                    score = mood_map.get(mood.mood, 3)
+                    mood_scores.append(score)
+                    analytics_data['data']['charts']['mood'].append({
+                        'date': mood.entry_time.date().isoformat(),
+                        'score': score,
+                        'mood': mood.mood
+                    })
+                
+                avg_mood = sum(mood_scores) / mood_count if mood_scores else 0
+                analytics_data['data']['summary']['avg_mood'] = round(avg_mood, 1)
+        except Exception as e:
+            logger.error(f"Mood error: {e}")
+        
+        analytics_data['data']['summary']['has_data'] = has_any_data
+        
+        # ========== 7. التوصيات ==========
+        recommendations = []
+        
+        # توصيات النوم
+        avg_sleep = analytics_data['data']['summary']['avg_sleep_hours']
+        if avg_sleep > 0 and avg_sleep < 7:
+            recommendations.append({
+                'category': 'sleep',
+                'priority': 'high',
+                'icon': '😴',
+                'title': is_arabic and 'تحسين جودة النوم' or 'Improve Sleep Quality',
+                'description': is_arabic and f'متوسط نومك {avg_sleep} ساعات' or f'Your average sleep is {avg_sleep} hours',
+                'advice': is_arabic and 'حاول النوم 7-8 ساعات يومياً لتحسين صحتك' or 'Try to sleep 7-8 hours daily for better health'
+            })
+        elif avg_sleep > 9 and avg_sleep > 0:
+            recommendations.append({
+                'category': 'sleep',
+                'priority': 'medium',
+                'icon': '😴',
+                'title': is_arabic and 'تقليل ساعات النوم' or 'Reduce Sleep Hours',
+                'description': is_arabic and f'متوسط نومك {avg_sleep} ساعات' or f'Your average sleep is {avg_sleep} hours',
+                'advice': is_arabic and 'النوم الزائد قد يؤثر على نشاطك اليومي' or 'Excessive sleep may affect your daily activity'
+            })
+        
+        # توصيات النشاط
+        total_activities = analytics_data['data']['summary']['total_activities']
+        if total_activities == 0 and has_any_data:
+            recommendations.append({
+                'category': 'activity',
+                'priority': 'high',
+                'icon': '🏃',
+                'title': is_arabic and 'ابدأ النشاط البدني' or 'Start Physical Activity',
+                'description': is_arabic and 'لا توجد أنشطة رياضية مسجلة' or 'No physical activities recorded',
+                'advice': is_arabic and 'جرب المشي 10 دقائق يومياً كبداية رائعة' or 'Try walking 10 minutes daily as a great start'
+            })
+        elif total_activities > 0 and total_activities < 10:
+            recommendations.append({
+                'category': 'activity',
+                'priority': 'medium',
+                'icon': '🏃',
+                'title': is_arabic and 'زيادة النشاط البدني' or 'Increase Physical Activity',
+                'description': is_arabic and f'سجلت {total_activities} نشاط في آخر 30 يوم' or f'You recorded {total_activities} activities in last 30 days',
+                'advice': is_arabic and 'حاول ممارسة الرياضة 3-4 مرات أسبوعياً' or 'Try to exercise 3-4 times per week'
+            })
+        
+        # توصيات العادات
+        habit_rate = analytics_data['data']['summary']['habit_completion_rate']
+        if habit_rate > 0 and habit_rate < 50:
+            recommendations.append({
+                'category': 'habits',
+                'priority': 'medium',
+                'icon': '✅',
+                'title': is_arabic and 'تحسين إنجاز العادات' or 'Improve Habit Completion',
+                'description': is_arabic and f'نسبة إنجاز العادات {habit_rate}%' or f'Habit completion rate is {habit_rate}%',
+                'advice': is_arabic and 'حدد عادة واحدة صغيرة والتزم بها يومياً' or 'Pick one small habit and stick to it daily'
+            })
+        
+        # توصية ترحيبية للمستخدم الجديد
+        if not has_any_data:
+            recommendations.append({
+                'category': 'general',
+                'priority': 'low',
+                'icon': '👋',
+                'title': is_arabic and 'مرحباً بك' or 'Welcome',
+                'description': is_arabic and 'ابدأ رحلتك الصحية معنا' or 'Start your health journey with us',
+                'advice': is_arabic and 'سجل أول نشاط بدني أو عادة صحية اليوم' or 'Log your first physical activity or healthy habit today'
+            })
+        
+        analytics_data['data']['personalized_recommendations'] = recommendations[:5]
+        
+        # ========== 8. الاتجاهات ==========
+        analytics_data['data']['trends'] = {
+            'sleep_trend': 'good' if 7 <= avg_sleep <= 9 else 'needs_improvement' if avg_sleep > 0 else 'unknown',
+            'activity_trend': 'active' if total_activities >= 15 else 'moderate' if total_activities >= 5 else 'inactive',
+            'habits_trend': 'improving' if habit_rate > 70 else 'stable' if habit_rate > 40 else 'needs_attention'
+        }
+        
+        return Response(analytics_data)
+        
     except Exception as e:
+        logger.error(f"🚨 Comprehensive analytics API error: {str(e)}")
+        logger.error(traceback.format_exc())
+        
         return Response({
             'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            'error': str(e),
+            'message': is_arabic and 'حدث خطأ في تحليل البيانات' or 'Error analyzing data',
+            'traceback': traceback.format_exc() if settings.DEBUG else None
+        }, status=500)
 
 # مثال لدالة get_recommendations_only
 @api_view(['GET'])
