@@ -39,7 +39,7 @@ from main.views import (
     analyze_sentiment_batch,analyze_with_context_api,get_mood_insights_api, quick_sentiment_api,
     health_dashboard, analyze_chat_message,public_analyze_sentiment,get_user_medical_records,get_medical_record_detail,
     get_health_analysis_api,delete_medical_record,
-    refresh_analysis,get_user_chronic_conditions,
+    refresh_analysis,get_user_chronic_conditions,test_medical_api,
     # ✅ دوال ESP32
     esp32_update_health_status,
     esp32_get_latest_health_status,
@@ -228,7 +228,7 @@ medical_urls = [
     path('medical-records/', get_user_medical_records, name='medical_records_list'),
     path('medical-records/<int:record_id>/', get_medical_record_detail, name='medical_record_detail'),
     path('medical-records/<int:record_id>/delete/', delete_medical_record, name='medical_record_delete'),
-    
+    path('medical/test/', test_medical_api, name='test_medical'),
     # 🩺 الأمراض المزمنة
     path('user/conditions/', get_user_chronic_conditions, name='user_conditions'),
 ]
