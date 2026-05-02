@@ -37,7 +37,7 @@ from main.views import (
     get_user_achievements, test_websocket, smart_insights,
     analyze_sentiment_text,
     analyze_sentiment_batch,analyze_with_context_api,get_mood_insights_api, quick_sentiment_api,
-    health_dashboard, analyze_chat_message,public_analyze_sentiment, get_user_chronic_conditions,get_user_medical_records,get_medical_record_detail,
+    health_dashboard, analyze_chat_message,public_analyze_sentiment,get_user_medical_records,get_medical_record_detail,
     get_health_analysis_api,delete_medical_record,
     refresh_analysis,
     # ✅ دوال ESP32
@@ -120,8 +120,7 @@ base_urls = [
     path('medications/user/', get_user_medications, name='user-medications'),
     path('medications/user/add/', add_user_medication, name='add-user-medication'),
     path('medications/user/<int:user_med_id>/delete/', delete_user_medication, name='delete-user-medication'),
-    
-    path('user/conditions/', get_user_chronic_conditions, name='user_conditions'),
+
 
     # 📱 Push Notifications
     path('push-subscribe/', push_subscribe, name='push-subscribe'),
