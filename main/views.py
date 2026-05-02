@@ -2843,7 +2843,7 @@ import json
 import PyPDF2
 import re
 from PIL import Image
-import pytesseract
+import pdfplumber
 from django.core.files.storage import default_storage
 from django.core.files.base import ContentFile
 from django.utils import timezone
@@ -2859,31 +2859,20 @@ from .serializers import MedicalRecordSerializer, ChronicConditionSerializer
 # ✅ دوال مساعدة لتحليل الملفات الطبية
 # =========================================================
 
+# استبدال pytesseract بـ pdfplumber للنصوص فقط
+
 def extract_text_from_pdf(file_path):
-    """استخراج النص من ملف PDF"""
+    """استخراج النص من ملف PDF باستخدام pdfplumber"""
     try:
         text = ""
-        with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            for page in pdf_reader.pages:
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
                 page_text = page.extract_text()
                 if page_text:
                     text += page_text + "\n"
         return text
     except Exception as e:
-        print(f"PDF extraction error: {e}")
-        return ""
-
-def extract_text_from_image(file_path):
-    """استخراج النص من صورة باستخدام OCR"""
-    try:
-        image = Image.open(file_path)
-        # محاولة بالعربية أولاً ثم الإنجليزية
-        text_arabic = pytesseract.image_to_string(image, lang='ara')
-        text_english = pytesseract.image_to_string(image, lang='eng')
-        return text_arabic + "\n" + text_english
-    except Exception as e:
-        print(f"Image OCR error: {e}")
+        print(f"⚠️ PDF extraction error: {e}")
         return ""
 
 def get_disease_arabic_name(disease_en):
