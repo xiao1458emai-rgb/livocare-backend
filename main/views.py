@@ -2836,3 +2836,19 @@ def public_analyze_sentiment(request):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+# main/views.py - أضف هذا الـ endpoint
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_chronic_conditions(request):
+    """جلب الأمراض المزمنة للمستخدم"""
+    try:
+        from main.models import ChronicCondition
+        conditions = ChronicCondition.objects.filter(user=request.user, is_active=True)
+        data = [{'id': c.id, 'name': c.name, 'diagnosis_date': c.diagnosis_date} for c in conditions]
+        return Response({'success': True, 'conditions': data})
+    except Exception as e:
+        return Response({'success': False, 'error': str(e), 'conditions': []})
