@@ -24,7 +24,7 @@ from main.views import (
     cron_test_simple,
     get_weather, search_food, analyze_sentiment,
     get_comprehensive_analytics_api,
-    get_recommendations_only,
+   get_recommendations_only,
     get_smart_recommendations, get_advanced_analytics,
     get_predictions_api,
     search_medication, get_medication_details, get_user_medications,
