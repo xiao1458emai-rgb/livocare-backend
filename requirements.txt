@@ -18,5 +18,4 @@ requests==2.32.3
 pandas==2.2.3
 scikit-learn==1.6.1
 django-crontab==0.7.1
-PyPDF2==3.0.1
 pdfplumber==0.10.4 
