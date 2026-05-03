@@ -32,7 +32,7 @@ from main.views import (
     compare_with_peers,
     get_smart_recommendations,
     search_medication, get_medication_details, get_user_medications,habit_medication_analytics_api,
-    habit_summary_api,habit_recommendations_api,habit_predictions_api,
+    habit_recommendations_api,habit_predictions_api,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
     analyze_sentiment_text,
