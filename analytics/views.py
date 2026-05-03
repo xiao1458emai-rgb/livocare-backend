@@ -274,75 +274,7 @@ def get_nutrition_insights(request):
         import traceback
         traceback.print_exc()
         return Response({'error': str(e)}, status=500)
-# analytics/views.py - أضف هذا في نهاية الملف
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_advanced_analytics(request):
-    """تحليلات صحية متقدمة باستخدام التعلم الآلي"""
-    try:
-        print("="*60)
-        print(f"🔬 جلب التحليلات المتقدمة للمستخدم: {request.user.username}")
-        
-        # ✅ تشخيص مفصل
-        import inspect
-        from main.services.exercise_service import AdvancedHealthAnalytics
-        
-        # 1. المسار الفعلي للملف
-        file_path = inspect.getfile(AdvancedHealthAnalytics)
-        print(f"📁 الملف المستخدم: {file_path}")
-        
-        # 2. قراءة الملف والبحث عن الدالة
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            if 'def get_comprehensive_analytics' in content:
-                print("✅ الدالة 'get_comprehensive_analytics' موجودة في الملف!")
-                # اعرض الأسطر المحيطة بالدالة
-                lines = content.split('\n')
-                for i, line in enumerate(lines):
-                    if 'def get_comprehensive_analytics' in line:
-                        print(f"   السطر {i+1}: {line}")
-                        print(f"   السطر {i+2}: {lines[i+1] if i+1 < len(lines) else ''}")
-                        print(f"   السطر {i+3}: {lines[i+2] if i+2 < len(lines) else ''}")
-                        break
-            else:
-                print("❌ الدالة 'get_comprehensive_analytics' غير موجودة في الملف!")
-                print("📄 آخر 500 حرف من الملف:")
-                print(content[-500:])
-        
-        # 3. إنشاء كائن
-        analytics_service = AdvancedHealthAnalytics(request.user)
-        
-        # 4. عرض الدوال المتاحة في الكائن
-        methods = dir(analytics_service)
-        print(f"📋 الدوال المتاحة في الكائن ({len(methods)}):")
-        relevant_methods = [m for m in methods if not m.startswith('_')]
-        for method in sorted(relevant_methods):
-            print(f"   - {method}")
-        
-        # 5. محاولة استدعاء الدالة
-        if hasattr(analytics_service, 'get_comprehensive_analytics'):
-            data = analytics_service.get_comprehensive_analytics()
-            print(f"✅ تم استدعاء الدالة بنجاح")
-        else:
-            print("❌ الدالة غير موجودة في الكائن!")
-            # محاولة استدعاء دوال بديلة
-            if hasattr(analytics_service, 'generate_smart_recommendations'):
-                print("⚠️ محاولة استخدام generate_smart_recommendations بدلاً من ذلك")
-                recommendations = analytics_service.generate_smart_recommendations()
-                data = {'recommendations': recommendations}
-            else:
-                return Response({'error': 'لا توجد دوال تحليل متاحة'}, status=500)
-        
-        return Response({
-            'success': True,
-            'data': data
-        })
-        
-    except Exception as e:
-        print(f"❌ خطأ: {e}")
-        import traceback
-        traceback.print_exc()
-        return Response({'error': str(e)}, status=500)
+
 # ==============================================================================
 # 🗑️ حذف كل رسائل الدردشة
 # ==============================================================================
