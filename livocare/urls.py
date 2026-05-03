@@ -33,7 +33,6 @@ urlpatterns = [
     path('api/analytics/activity-insights/', analytics_views.get_activity_insights, name='activity-insights'),
     path('api/analytics/habit-insights/', analytics_views.get_habit_insights, name='habit-insights'),
     path('api/analytics/mood-insights/', analytics_views.get_mood_insights, name='mood-insights'),
-    path('api/analytics/advanced/', analytics_views.get_advanced_analytics, name='advanced-analytics'),
     
     # ==========================================================================
     # 🗑️ أدوات مساعدة
