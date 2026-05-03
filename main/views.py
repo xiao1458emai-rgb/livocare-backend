@@ -3153,6 +3153,80 @@ class AdvancedHealthAnalyticsML:
 
 
 # ==============================================================================
+# ✅ دوال API للتحليلات المتقدمة
+# ==============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_advanced_analytics(request):
+    """
+    API للتحليلات الصحية المتقدمة باستخدام scikit-learn
+    """
+    language = request.GET.get('lang', 'ar')
+    is_arabic = language == 'ar'
+    
+    try:
+        analytics_engine = AdvancedHealthAnalyticsML(request.user, is_arabic)
+        analysis = analytics_engine.get_complete_analysis()
+        
+        return Response({
+            'success': True,
+            'data': analysis,
+            'is_arabic': is_arabic,
+            'message': is_arabic and '✓ تم التحليل باستخدام الذكاء الاصطناعي' or '✓ Analyzed with AI'
+        })
+        
+    except Exception as e:
+        logger.error(f"Advanced analytics error: {e}")
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': is_arabic and 'حدث خطأ في التحليل المتقدم' or 'Error in advanced analysis'
+        }, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_predictions_api(request):
+    """
+    API للحصول على التوقعات فقط
+    """
+    language = request.GET.get('lang', 'ar')
+    is_arabic = language == 'ar'
+    
+    try:
+        analytics_engine = AdvancedHealthAnalyticsML(request.user, is_arabic)
+        weight_pred = analytics_engine.predict_weight()
+        
+        predictions = []
+        
+        if weight_pred:
+            predictions.append({
+                'icon': '⚖️',
+                'label': is_arabic and 'الوزن المتوقع بعد أسبوعين' or 'Expected weight in 2 weeks',
+                'value': f"{weight_pred['predicted']} kg",
+                'trend': weight_pred['trend'],
+                'trend_text': is_arabic and 'زيادة متوقعة' if weight_pred['trend'] == 'up' else is_arabic and 'نقصان متوقع' if weight_pred['trend'] == 'down' else is_arabic and 'مستقر' else 'Expected increase' if weight_pred['trend'] == 'up' else 'Expected decrease' if weight_pred['trend'] == 'down' else 'Stable',
+                'note': is_arabic and f"التغيير المتوقع: {abs(weight_pred['change'])} كجم" or f"Expected change: {abs(weight_pred['change'])} kg",
+                'confidence': weight_pred.get('confidence', 70)
+            })
+        
+        return Response({
+            'success': True,
+            'predictions': predictions,
+            'is_arabic': is_arabic,
+            'has_predictions': len(predictions) > 0
+        })
+        
+    except Exception as e:
+        logger.error(f"Predictions API error: {e}")
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': is_arabic and 'حدث خطأ في جلب التوقعات' or 'Error fetching predictions'
+        }, status=500)
+
+# ==============================================================================
 # ✅ دالة تحديث get_comprehensive_analytics_api
 # ==============================================================================
 
