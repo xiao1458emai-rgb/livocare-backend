@@ -3184,6 +3184,7 @@ def get_advanced_analytics(request):
             'message': is_arabic and 'حدث خطأ في التحليل المتقدم' or 'Error in advanced analysis'
         }, status=500)
 
+# main/views.py - استبدل دالة get_predictions_api بهذه النسخة
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -3201,12 +3202,20 @@ def get_predictions_api(request):
         predictions = []
         
         if weight_pred:
+            # تحديد نص الاتجاه
+            if weight_pred['trend'] == 'up':
+                trend_text = 'زيادة متوقعة' if is_arabic else 'Expected increase'
+            elif weight_pred['trend'] == 'down':
+                trend_text = 'نقصان متوقع' if is_arabic else 'Expected decrease'
+            else:
+                trend_text = 'مستقر' if is_arabic else 'Stable'
+            
             predictions.append({
                 'icon': '⚖️',
                 'label': is_arabic and 'الوزن المتوقع بعد أسبوعين' or 'Expected weight in 2 weeks',
                 'value': f"{weight_pred['predicted']} kg",
                 'trend': weight_pred['trend'],
-                'trend_text': is_arabic and 'زيادة متوقعة' if weight_pred['trend'] == 'up' else is_arabic and 'نقصان متوقع' if weight_pred['trend'] == 'down' else is_arabic and 'مستقر' else 'Expected increase' if weight_pred['trend'] == 'up' else 'Expected decrease' if weight_pred['trend'] == 'down' else 'Stable',
+                'trend_text': trend_text,
                 'note': is_arabic and f"التغيير المتوقع: {abs(weight_pred['change'])} كجم" or f"Expected change: {abs(weight_pred['change'])} kg",
                 'confidence': weight_pred.get('confidence', 70)
             })
@@ -3220,6 +3229,7 @@ def get_predictions_api(request):
         
     except Exception as e:
         logger.error(f"Predictions API error: {e}")
+        logger.error(traceback.format_exc())
         return Response({
             'success': False,
             'error': str(e),
