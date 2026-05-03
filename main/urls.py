@@ -168,7 +168,6 @@ cron_urls = [
 ]
 habit_analytics_urls = [
     path('habits/analytics/', habit_medication_analytics_api, name='habit_analytics'),
-    path('habits/summary/', habit_summary_api, name='habit_summary'),
     path('habits/recommendations/', habit_recommendations_api, name='habit_recommendations'),
     path('habits/predictions/', habit_predictions_api, name='habit_predictions'),
 ]

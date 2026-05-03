@@ -2641,162 +2641,8 @@ def compare_with_peers(request):
             'success': False,
             'error': str(e)
         }, status=500)
-"""
-خدمة تحليلات العادات والأدوية المتقدمة
-Advanced Habits & Medications Analytics Service using scikit-learn
-"""
-
-import numpy as np
-import pandas as pd
-from datetime import timedelta, datetime
-from django.utils import timezone
-from django.db.models import Avg, Sum, Count, Q, F
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier, IsolationForest
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LinearRegression
-import warnings
-warnings.filterwarnings('ignore')
-
-from .models import (
-    HabitDefinition, HabitLog, Medication, UserMedication,
-    Sleep, MoodEntry, PhysicalActivity, HealthStatus
-)
-
-# ==============================================================================
-# استيرادات DRF لدوال API
-# ==============================================================================
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework import status
 
 
-class HabitMedicationAnalyticsService:
-    """
-    خدمة متخصصة لتحليلات العادات والأدوية باستخدام التعلم الآلي
-    تقدم توصيات مخصصة بناءً على سلوك المستخدم والتزامه
-    """
-    
-    def __init__(self, user, language='ar'):
-        self.user = user
-        self.language = language
-        self.is_arabic = language.startswith('ar')
-        self.today = timezone.now()
-        self.today_date = self.today.date()
-        self.week_ago = self.today - timedelta(days=7)
-        self.month_ago = self.today - timedelta(days=30)
-        self.three_months_ago = self.today - timedelta(days=90)
-        
-        # نماذج ML
-        self._models = {}
-        self._scaler = StandardScaler()
-        
-    # ... كل دوال class HabitMedicationAnalyticsService هنا ...
-    # (get_summary, get_correlations, get_recommendations, get_predictions, ...)
-    # ... إلى أن تصل إلى نهاية class ...
-
-
-# ==============================================================================
-# ==============================================================================
-# دوال API باستخدام DRF (مع مصادقة صحيحة) - ✅ هذا هو التعريف الصحيح والوحيد
-# ==============================================================================
-# ==============================================================================
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def habit_medication_analytics_api(request):
-    """
-    API للحصول على تحليلات العادات والأدوية
-    """
-    language = request.GET.get('lang', 'ar')
-    
-    try:
-        service = HabitMedicationAnalyticsService(request.user, language=language)
-        result = service.get_complete_analysis()
-        return Response({
-            'success': True,
-            'data': result,
-            'is_arabic': language == 'ar'
-        })
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e),
-            'message': 'حدث خطأ في تحليل العادات' if language == 'ar' else 'Error analyzing habits'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def habit_summary_api(request):
-    """
-    API للحصول على ملخص سريع للعادات (للوحات الرئيسية)
-    """
-    language = request.GET.get('lang', 'ar')
-    
-    try:
-        service = HabitMedicationAnalyticsService(request.user, language=language)
-        summary = service.get_summary()
-        return Response({
-            'success': True,
-            'summary': summary,
-            'is_arabic': language == 'ar'
-        })
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def habit_recommendations_api(request):
-    """
-    API للحصول على توصيات العادات فقط
-    """
-    language = request.GET.get('lang', 'ar')
-    limit = int(request.GET.get('limit', 5))
-    
-    try:
-        service = HabitMedicationAnalyticsService(request.user, language=language)
-        recommendations = service.get_recommendations()
-        return Response({
-            'success': True,
-            'recommendations': recommendations[:limit],
-            'total': len(recommendations),
-            'is_arabic': language == 'ar'
-        })
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def habit_predictions_api(request):
-    """
-    API للحصول على توقعات العادات
-    """
-    language = request.GET.get('lang', 'ar')
-    
-    try:
-        service = HabitMedicationAnalyticsService(request.user, language=language)
-        summary = service.get_summary()
-        predictions = service.get_predictions(summary)
-        return Response({
-            'success': True,
-            'predictions': predictions,
-            'is_arabic': language == 'ar'
-        })
-    except Exception as e:
-        return Response({
-            'success': False,
-            'error': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # ==============================================================================
@@ -3662,3 +3508,107 @@ def test_medical_api(request):
             'GET /api/user/conditions/'
         ]
     })
+
+import logging
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
+
+# تأكد من استيراد الخدمة بشكل صحيح. المسار يعتمد على هيكل مجلدك.
+# افترض أن الخدمة موجودة في main/services/habit_analytics_service.py
+try:
+    from .services.habit_analytics_service import HabitMedicationAnalyticsService
+    SERVICE_AVAILABLE = True
+except ImportError:
+    # محاولة استيراد بديلة إذا كانت في نفس المجلد
+    try:
+        from services.habit_analytics_service import HabitMedicationAnalyticsService
+        SERVICE_AVAILABLE = True
+    except ImportError:
+        SERVICE_AVAILABLE = False
+        print("ERROR: Could not import HabitMedicationAnalyticsService")
+
+
+logger = logging.getLogger(__name__)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def habit_medication_analytics_api(request):
+    """API للحصول على تحليلات العادات والأدوية (خدمة متقدمة)"""
+    language = request.GET.get('lang', 'ar')
+
+    if not SERVICE_AVAILABLE:
+        logger.error("HabitMedicationAnalyticsService is not available.")
+        return Response({
+            'success': False,
+            'error': 'Service configuration error.',
+            'message': 'خدمة التحليلات غير متوفرة حالياً' if language == 'ar' else 'Analytics service is currently unavailable.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    try:
+        # إنشاء مثيل من الخدمة
+        service = HabitMedicationAnalyticsService(request.user, language=language)
+        result = service.get_complete_analysis()
+        
+        return Response({
+            'success': True,
+            'data': result,
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        # تسجيل الخطأ الكامل في سجلات الخادم
+        logger.error(f"Error in habit_medication_analytics_api: {str(e)}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': 'حدث خطأ في تحليل العادات' if language == 'ar' else 'Error analyzing habits'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def habit_recommendations_api(request):
+    """API للحصول على توصيات العادات فقط"""
+    language = request.GET.get('lang', 'ar')
+    limit = int(request.GET.get('limit', 5))
+
+    if not SERVICE_AVAILABLE:
+        return Response({'success': False, 'error': 'Service not available'}, status=500)
+
+    try:
+        service = HabitMedicationAnalyticsService(request.user, language=language)
+        # get_recommendations لا تحتاج إلى تمرير summary اختيارياً
+        recommendations = service.get_recommendations() 
+        return Response({
+            'success': True,
+            'recommendations': recommendations[:limit],
+            'total': len(recommendations),
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        logger.error(f"Error in habit_recommendations_api: {str(e)}", exc_info=True)
+        return Response({'success': False, 'error': str(e)}, status=500)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def habit_predictions_api(request):
+    """API للحصول على توقعات العادات"""
+    language = request.GET.get('lang', 'ar')
+
+    if not SERVICE_AVAILABLE:
+        return Response({'success': False, 'error': 'Service not available'}, status=500)
+
+    try:
+        service = HabitMedicationAnalyticsService(request.user, language=language)
+        summary = service.get_summary() # نحتاج ملخص للحصول على التوقعات
+        predictions = service.get_predictions(summary)
+        return Response({
+            'success': True,
+            'predictions': predictions,
+            'is_arabic': language == 'ar'
+        })
+    except Exception as e:
+        logger.error(f"Error in habit_predictions_api: {str(e)}", exc_info=True)
+        return Response({'success': False, 'error': str(e)}, status=500)
