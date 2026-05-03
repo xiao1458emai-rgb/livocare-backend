@@ -23,7 +23,6 @@ from main.views import (
     cron_daily_summary, cron_morning_tip, cron_smart_notifications,
     cron_test_simple,
     get_weather, search_food, analyze_sentiment,
-    comprehensive_health_analytics_view,
     get_comprehensive_analytics_api,
     compare_with_peers,get_recommendations_only,
     get_smart_recommendations,
