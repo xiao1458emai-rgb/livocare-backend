@@ -1,21 +1,16 @@
 """
-خدمة تحليلات العادات والأدوية المتقدمة - نسخة خفيفة (10 أيام فقط) - مصححة
+خدمة تحليلات الأدوية - تركز على التفاعلات والآثار الجانبية
 """
 
 import numpy as np
-import pandas as pd
-from datetime import timedelta, datetime
+from datetime import timedelta
 from django.utils import timezone
-from django.db.models import Avg, Sum, Count, Q, F
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LinearRegression
+from django.db.models import Q
 import warnings
 warnings.filterwarnings('ignore')
 
 from ..models import (
-    HabitDefinition, HabitLog, Medication, UserMedication,
-    Sleep, MoodEntry, PhysicalActivity, HealthStatus
+    HabitDefinition, HabitLog, UserMedication
 )
 
 from rest_framework.decorators import api_view, permission_classes
@@ -24,10 +19,123 @@ from rest_framework.response import Response
 from rest_framework import status
 
 
+# ============================================================
+# قاعدة بيانات التفاعلات الدوائية والآثار الجانبية
+# ============================================================
+
+DRUG_INTERACTIONS = {
+    # الأدوية المتفاعلة مع بعضها
+    'ibuprofen': {
+        'interacts_with': ['warfarin', 'aspirin', 'lisinopril', 'metformin', 'furosemide', 'sertraline', 'fluoxetine'],
+        'severity': 'high',
+        'description_ar': 'يزيد خطر النزيف ومشاكل الكلى',
+        'description_en': 'Increases risk of bleeding and kidney problems'
+    },
+    'warfarin': {
+        'interacts_with': ['ibuprofen', 'aspirin', 'paracetamol', 'amiodarone', 'antibiotics', 'sertraline'],
+        'severity': 'high',
+        'description_ar': 'يزيد خطر النزيف بشكل كبير',
+        'description_en': 'Significantly increases bleeding risk'
+    },
+    'aspirin': {
+        'interacts_with': ['ibuprofen', 'warfarin', 'heparin', 'sertraline', 'fluoxetine'],
+        'severity': 'high',
+        'description_ar': 'يزيد خطر النزيف',
+        'description_en': 'Increases bleeding risk'
+    },
+    'metformin': {
+        'interacts_with': ['furosemide', 'cimetidine', 'ibuprofen'],
+        'severity': 'medium',
+        'description_ar': 'قد يؤثر على وظائف الكلى',
+        'description_en': 'May affect kidney function'
+    },
+    'lisinopril': {
+        'interacts_with': ['ibuprofen', 'potassium_supplements', 'spironolactone'],
+        'severity': 'medium',
+        'description_ar': 'قد يسبب ارتفاع البوتاسيوم',
+        'description_en': 'May cause high potassium levels'
+    },
+    'sertraline': {
+        'interacts_with': ['ibuprofen', 'aspirin', 'warfarin', 'tramadol', 'lithium'],
+        'severity': 'high',
+        'description_ar': 'يزيد خطر النزيف ومتلازمة السيروتونين',
+        'description_en': 'Increases risk of bleeding and serotonin syndrome'
+    },
+    'fluoxetine': {
+        'interacts_with': ['ibuprofen', 'aspirin', 'tramadol', 'lithium'],
+        'severity': 'high',
+        'description_ar': 'يزيد خطر النزيف ومتلازمة السيروتونين',
+        'description_en': 'Increases risk of bleeding and serotonin syndrome'
+    },
+    'atorvastatin': {
+        'interacts_with': ['grapefruit', 'clarithromycin', 'itraconazole', 'cyclosporine'],
+        'severity': 'medium',
+        'description_ar': 'يزيد خطر الآلام العضلية',
+        'description_en': 'Increases risk of muscle pain'
+    },
+    'simvastatin': {
+        'interacts_with': ['grapefruit', 'clarithromycin', 'cyclosporine'],
+        'severity': 'medium',
+        'description_ar': 'يزيد خطر الآلام العضلية',
+        'description_en': 'Increases risk of muscle pain'
+    },
+    'amlodipine': {
+        'interacts_with': ['grapefruit', 'simvastatin', 'clarithromycin'],
+        'severity': 'medium',
+        'description_ar': 'قد يسبب انخفاض الضغط',
+        'description_en': 'May cause low blood pressure'
+    },
+    'tramadol': {
+        'interacts_with': ['antidepressants', 'alcohol', 'benzodiazepines', 'carbamazepine'],
+        'severity': 'high',
+        'description_ar': 'يزيد خطر التشنجات ومتلازمة السيروتونين',
+        'description_en': 'Increases risk of seizures and serotonin syndrome'
+    },
+    'levothyroxine': {
+        'interacts_with': ['calcium', 'iron', 'aluminum_hydroxide', 'amiodarone'],
+        'severity': 'medium',
+        'description_ar': 'يقلل امتصاص الدواء',
+        'description_en': 'Reduces drug absorption'
+    },
+    'omeprazole': {
+        'interacts_with': ['clopidogrel', 'digoxin', 'methotrexate'],
+        'severity': 'medium',
+        'description_ar': 'يقلل فعالية الأدوية الأخرى',
+        'description_en': 'Reduces effectiveness of other medications'
+    }
+}
+
+# الآثار الجانبية الشائعة
+COMMON_SIDE_EFFECTS = {
+    'ibuprofen': ['غثيان', 'حرقة المعدة', 'دوخة', 'احتباس السوائل', 'ارتفاع الضغط'],
+    'metformin': ['غثيان', 'إسهال', 'انتفاخ', 'طعم معدني', 'فقدان الشهية'],
+    'sertraline': ['غثيان', 'أرق', 'جفاف الفم', 'دوخة', 'زيادة الوزن'],
+    'fluoxetine': ['غثيان', 'أرق', 'قلق', 'صداع', 'جفاف الفم'],
+    'lisinopril': ['سعال جاف', 'دوخة', 'صداع', 'انخفاض الضغط', 'ارتفاع البوتاسيوم'],
+    'amlodipine': ['تورم الأطراف', 'صداع', 'دوخة', 'احمرار الوجه', 'خفقان'],
+    'atorvastatin': ['آلام عضلية', 'ضعف عام', 'اضطرابات هضمية', 'ارتفاع إنزيمات الكبد'],
+    'simvastatin': ['آلام عضلية', 'ضعف عام', 'اضطرابات هضمية'],
+    'warfarin': ['نزيف', 'كدمات', 'بول دموي', 'براز أسود'],
+    'aspirin': ['تهيج المعدة', 'حرقة', 'غثيان', 'نزيف'],
+    'levothyroxine': ['خفقان', 'عصبية', 'أرق', 'رعشة', 'فقدان الوزن'],
+    'tramadol': ['غثيان', 'دوخة', 'نعاس', 'إمساك', 'صداع']
+}
+
+# أوقات التناول الموصى بها
+SUGGESTED_TIMES = {
+    'metformin': {'time_ar': 'مع الوجبات', 'time_en': 'With meals', 'reason_ar': 'لتقليل اضطرابات المعدة', 'reason_en': 'To reduce stomach upset'},
+    'statin': {'time_ar': 'مساءً', 'time_en': 'Evening', 'reason_ar': 'الكوليسترول يُنتج ليلاً', 'reason_en': 'Cholesterol is produced at night'},
+    'pril': {'time_ar': 'صباحاً', 'time_en': 'Morning', 'reason_ar': 'لتجنب انخفاض الضغط ليلاً', 'reason_en': 'To avoid night-time low blood pressure'},
+    'dipine': {'time_ar': 'صباحاً', 'time_en': 'Morning', 'reason_ar': 'للحفاظ على ضغط دم منتظم', 'reason_en': 'To maintain regular blood pressure'},
+    'ibuprofen': {'time_ar': 'مع الوجبات', 'time_en': 'With meals', 'reason_ar': 'لتقليل تهيج المعدة', 'reason_en': 'To reduce stomach irritation'},
+    'sertraline': {'time_ar': 'صباحاً', 'time_en': 'Morning', 'reason_ar': 'لتجنب الأرق', 'reason_en': 'To avoid insomnia'},
+    'fluoxetine': {'time_ar': 'صباحاً', 'time_en': 'Morning', 'reason_ar': 'لتجنب الأرق', 'reason_en': 'To avoid insomnia'},
+    'levothyroxine': {'time_ar': 'صباحاً على الريق', 'time_en': 'Morning on empty stomach', 'reason_ar': 'للحصول على أفضل امتصاص', 'reason_en': 'For best absorption'}
+}
+
+
 class HabitMedicationAnalyticsService:
-    """
-    خدمة متخصصة لتحليلات العادات والأدوية - نسخة خفيفة (10 أيام فقط)
-    """
+    """خدمة تحليلات الأدوية - تركز على التفاعلات والآثار الجانبية"""
     
     def __init__(self, user, language='ar'):
         self.user = user
@@ -35,497 +143,232 @@ class HabitMedicationAnalyticsService:
         self.is_arabic = language.startswith('ar')
         self.today = timezone.now()
         self.today_date = self.today.date()
-        self.week_ago = self.today - timedelta(days=7)
         
-        # ✅ تغيير جوهري: 10 أيام فقط بدلاً من 30/60/90
-        self.analysis_days = 10
-        self.analysis_start = self.today - timedelta(days=self.analysis_days)
-        
-        # نماذج ML
-        self._models = {}
-        self._scaler = StandardScaler()
-        
-    def _t(self, ar_text, en_text, **kwargs):
+    def _t(self, ar_text, en_text):
         """ترجمة النصوص"""
-        text = ar_text if self.is_arabic else en_text
-        if kwargs:
-            try:
-                return text.format(**kwargs)
-            except KeyError:
-                return text
-        return text
+        return ar_text if self.is_arabic else en_text
     
     def _is_medication(self, habit):
-        """✅ دالة مساعدة لتحديد إذا كانت العادة دواء أم لا"""
+        """تحديد إذا كانت العادة دواء"""
         text = (habit.name + ' ' + (habit.description or '')).lower()
-        
-        # كلمات مفتاحية للأدوية
-        medication_keywords = [
-            'دواء', 'medication', 'حبة', 'pill', 'علاج', 'treatment',
-            'ibuprofen', 'paracetamol', 'advil', 'tylenol', 'aspirin',
-            'metformin', 'lisinopril', 'amlodipine', 'atorvastatin',
-            'simvastatin', 'oxytocin', 'pitocin', 'valproate',
-            'amitriptyline', 'propranolol', 'mg', 'ملجم', 'جرعة', 'dose',
-            'injection', 'tablet', 'capsule', 'syrup', 'suspension'
-        ]
-        
-        # أيقونات الدواء في الوصف
-        medication_icons = ['💊', '🏭', '💉', '📦', '🔢']
-        
+        medication_keywords = ['ibuprofen', 'metformin', 'lisinopril', 'amlodipine', 'sertraline', 
+                               'fluoxetine', 'atorvastatin', 'simvastatin', 'warfarin', 'aspirin',
+                               'tramadol', 'levothyroxine', 'omeprazole', 'دواء', 'medication',
+                               'mg', 'ملجم', 'pill', 'tablet', 'capsule']
         for keyword in medication_keywords:
             if keyword in text:
                 return True
-        
-        for icon in medication_icons:
-            if icon in (habit.description or ''):
-                return True
-        
         return False
     
-    def _get_habits_data(self):
-        """جلب بيانات العادات للتحليل (آخر 10 أيام فقط)"""
+    def get_summary(self):
+        """ملخص بسيط للعادات والأدوية"""
         all_habits = HabitDefinition.objects.filter(user=self.user, is_active=True)
-        
-        # ✅ تقسيم العادات إلى عادات وأدوية
-        habits = [h for h in all_habits if not self._is_medication(h)]
         medications = [h for h in all_habits if self._is_medication(h)]
+        habits = [h for h in all_habits if not self._is_medication(h)]
         
         habit_logs = HabitLog.objects.filter(
             habit__user=self.user,
-            log_date__gte=self.analysis_start.date()
-        ).select_related('habit')
-        
-        # ✅ تجهيز DataFrame للتحليل (10 أيام فقط)
-        dates = pd.date_range(start=self.analysis_start.date(), end=self.today_date, freq='D')
-        df = pd.DataFrame(index=dates)
-        
-        # إضافة أعمدة للعادات فقط (وليس الأدوية)
-        for habit in habits:
-            habit_logs_filtered = habit_logs.filter(habit=habit)
-            completed_series = []
-            for date in dates:
-                log = habit_logs_filtered.filter(log_date=date.date()).first()
-                completed_series.append(1 if log and log.is_completed else 0)
-            df[habit.name] = completed_series
-        
-        # إضافة ميزات زمنية
-        df['day_of_week'] = df.index.dayofweek
-        df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(int)
-        
-        # إضافة معدلات الالتزام
-        if habits:
-            df['completion_rate'] = df[[h.name for h in habits]].mean(axis=1)
-        else:
-            df['completion_rate'] = 0
-        
-        return {
-            'df': df,
-            'habits': habits,
-            'medications': medications,
-            'habit_logs': habit_logs,
-            'total_habits': len(habits),
-            'total_medications': len(medications),
-            'total_logs': habit_logs.count()
-        }
-    
-    def get_summary(self):
-        """الحصول على ملخص العادات والأدوية (آخر 10 أيام)"""
-        
-        habit_data = self._get_habits_data()
-        habits = habit_data['habits']
-        medications = habit_data['medications']
-        
-        # ✅ سجلات آخر 10 أيام فقط
-        habit_logs = habit_data['habit_logs']
-        
-        # ✅ الأدوية النشطة من UserMedication (إن وجدت)
-        active_medications_db = UserMedication.objects.filter(
-            user=self.user,
-            start_date__lte=self.today_date
-        ).filter(Q(end_date__isnull=True) | Q(end_date__gte=self.today_date))
-        
-        # ✅ إجمالي الأدوية = أدوية من العادات + أدوية من UserMedication
-        total_medications = len(medications) + active_medications_db.count()
+            log_date__gte=self.today - timedelta(days=7)
+        )
         
         total_habits = len(habits)
+        completed_today = habit_logs.filter(log_date=self.today_date, is_completed=True).count()
+        completion_rate = round((completed_today / total_habits) * 100) if total_habits > 0 else 0
         
-        # ✅ تصحيح: حساب الإنجاز اليومي (من العادات فقط)
-        today_logs = habit_logs.filter(log_date=self.today_date)
-        completed_today_habits = today_logs.filter(habit__in=habits, is_completed=True).count()
-        completion_rate = round((completed_today_habits / total_habits) * 100) if total_habits > 0 else 0
-        
-        # ✅ حساب الالتزام بالأدوية من سجلات الأدوية فقط
-        med_adherence = 0
-        if medications:
-            med_logs = habit_logs.filter(habit__in=medications)
-            med_total = med_logs.count()
-            if med_total > 0:
-                med_completed = med_logs.filter(is_completed=True).count()
-                med_adherence = round((med_completed / med_total) * 100)
-            else:
-                med_adherence = 0
-        
-        # ✅ إضافة إجمالي العناصر اليومية المكتملة (للعرض)
-        completed_today_total = today_logs.filter(is_completed=True).count()
-        
-        # ✅ أقوى عادة وأضعف عادة
-        habit_completion = {}
-        for habit in habits:
-            logs = habit_logs.filter(habit=habit)
-            if logs.exists():
-                completed = logs.filter(is_completed=True).count()
-                total = logs.count()
-                habit_completion[habit.name] = round((completed / total) * 100) if total > 0 else 0
-        
-        best_habit = max(habit_completion, key=habit_completion.get) if habit_completion else None
-        
-        # ✅ حساب السلسلة (Streak)
+        return {
+            'total_habits': total_habits,
+            'total_medications': len(medications),
+            'completion_rate': completion_rate,
+            'streak': self._calculate_streak(habit_logs, habits)
+        }
+    
+    def _calculate_streak(self, habit_logs, habits):
+        """حساب السلسلة"""
+        if not habits:
+            return 0
         streak = 0
         current_date = self.today_date
         habit_ids = [h.id for h in habits]
-        
-        for _ in range(self.analysis_days):
+        for _ in range(10):
             day_logs = habit_logs.filter(log_date=current_date, habit_id__in=habit_ids)
             if day_logs.exists() and day_logs.filter(is_completed=True).exists():
                 streak += 1
                 current_date -= timedelta(days=1)
             else:
                 break
+        return streak
+    
+    def analyze_medications(self):
+        """تحليل متعمق للأدوية: التفاعلات، الآثار الجانبية، أوقات التناول"""
+        all_habits = HabitDefinition.objects.filter(user=self.user, is_active=True)
+        medications = [h for h in all_habits if self._is_medication(h)]
+        
+        if not medications:
+            return {'medications': [], 'interactions': [], 'has_medications': False}
+        
+        # تحليل كل دواء
+        analyzed_meds = []
+        for med in medications:
+            med_name_lower = med.name.lower()
+            
+            # البحث عن الآثار الجانبية
+            side_effects = []
+            for drug_name, effects in COMMON_SIDE_EFFECTS.items():
+                if drug_name in med_name_lower:
+                    side_effects = effects
+                    break
+            
+            # البحث عن وقت التناول الموصى به
+            suggested_time = None
+            for drug_name, time_info in SUGGESTED_TIMES.items():
+                if drug_name in med_name_lower:
+                    suggested_time = {
+                        'time': self._t(time_info['time_ar'], time_info['time_en']),
+                        'reason': self._t(time_info['reason_ar'], time_info['reason_en'])
+                    }
+                    break
+            
+            analyzed_meds.append({
+                'id': med.id,
+                'name': med.name,
+                'description': med.description,
+                'side_effects': side_effects,
+                'suggested_time': suggested_time
+            })
+        
+        # تحليل التفاعلات بين الأدوية
+        interactions = []
+        for i in range(len(analyzed_meds)):
+            for j in range(i + 1, len(analyzed_meds)):
+                med1_name = analyzed_meds[i]['name'].lower()
+                med2_name = analyzed_meds[j]['name'].lower()
+                
+                for drug, info in DRUG_INTERACTIONS.items():
+                    if drug in med1_name:
+                        for interact in info['interacts_with']:
+                            if interact in med2_name:
+                                interactions.append({
+                                    'medication1': analyzed_meds[i]['name'],
+                                    'medication2': analyzed_meds[j]['name'],
+                                    'severity': info['severity'],
+                                    'description': self._t(info['description_ar'], info['description_en'])
+                                })
+                    if drug in med2_name:
+                        for interact in info['interacts_with']:
+                            if interact in med1_name:
+                                interactions.append({
+                                    'medication1': analyzed_meds[j]['name'],
+                                    'medication2': analyzed_meds[i]['name'],
+                                    'severity': info['severity'],
+                                    'description': self._t(info['description_ar'], info['description_en'])
+                                })
+        
+        # إزالة التكرارات
+        unique_interactions = []
+        seen = set()
+        for inter in interactions:
+            key = f"{inter['medication1']}_{inter['medication2']}"
+            if key not in seen:
+                seen.add(key)
+                unique_interactions.append(inter)
         
         return {
-            'total_habits': total_habits,
-            'total_medications': total_medications,
-            'active_medications': total_medications,
-            'completed_today_habits': completed_today_habits,  # ✅ فقط العادات
-            'completed_today_total': completed_today_total,    # ✅ العادات + الأدوية
-            'completion_rate': completion_rate,               # ✅ نسبة العادات فقط
-            'medication_adherence': med_adherence,            # ✅ نسبة الأدوية فقط
-            'best_habit': best_habit,
-            'habit_completion_rates': habit_completion,
-            'streak': streak,
-            'analysis_days': self.analysis_days
+            'medications': analyzed_meds,
+            'interactions': unique_interactions[:10],
+            'has_medications': True,
+            'total_medications': len(analyzed_meds),
+            'interactions_count': len(unique_interactions)
         }
     
-    def get_correlations(self):
-        """تحليل العلاقات بين العادات وعوامل أخرى - فقط إذا كان هناك بيانات كافية"""
-        
-        correlations = []
-        habit_data = self._get_habits_data()
-        df = habit_data['df']
-        
-        # ✅ تحتاج على الأقل 5 أيام من البيانات لتحليل ذي معنى
-        if len(df) < 5:
-            return correlations
-        
-        # ✅ تحتاج إلى عادات نشطة على الأقل
-        if len(habit_data['habits']) < 2:
-            return correlations
-        
-        # بيانات النوم (آخر 10 أيام)
-        sleep_data = Sleep.objects.filter(
-            user=self.user,
-            sleep_start__gte=self.analysis_start
-        )
-        
-        # بيانات المزاج (آخر 10 أيام)
-        mood_data = MoodEntry.objects.filter(
-            user=self.user,
-            entry_time__gte=self.analysis_start
-        )
-        
-        # ✅ التحقق من وجود بيانات كافية للنوم
-        if sleep_data.exists() and len(df) >= 5:
-            avg_sleep = sleep_data.aggregate(Avg('duration_hours'))['duration_hours__avg'] or 0
-            completion_rates = df['completion_rate'].dropna()
-            if len(completion_rates) > 0:
-                completion_rate = completion_rates.mean() * 100
-                
-                if completion_rate > 50 and avg_sleep >= 7:
-                    correlations.append({
-                        'icon': '😴',
-                        'title': self._t('العادات وجودة النوم', 'Habits & Sleep Quality'),
-                        'description': self._t(
-                            f'التزامك بالعادات ({completion_rate:.0f}%) مرتبط بنوم {avg_sleep:.0f} ساعات',
-                            f'Your habit adherence ({completion_rate:.0f}%) is linked to {avg_sleep:.0f} hours of sleep'
-                        ),
-                        'strength': min(0.7, completion_rate / 100),
-                        'sample_size': len(df)
-                    })
-        
-        # ✅ التحقق من وجود بيانات كافية للمزاج
-        if mood_data.exists() and len(df) >= 5:
-            good_mood_count = mood_data.filter(mood__in=['Excellent', 'Good']).count()
-            total_moods = mood_data.count()
-            
-            if total_moods >= 3:
-                good_mood_rate = (good_mood_count / total_moods) * 100
-                completion_rates = df['completion_rate'].dropna()
-                
-                if len(completion_rates) > 0:
-                    completion_rate = completion_rates.mean() * 100
-                    
-                    if completion_rate > 40 and good_mood_rate > 50:
-                        correlations.append({
-                            'icon': '😊',
-                            'title': self._t('العادات والمزاج', 'Habits & Mood'),
-                            'description': self._t(
-                                'الأيام التي تلتزم فيها بعاداتك غالباً ما يكون مزاجك أفضل',
-                                'Days you stick to your habits, your mood tends to be better'
-                            ),
-                            'strength': min(0.6, (completion_rate / 100) * (good_mood_rate / 100)),
-                            'sample_size': min(len(df), total_moods)
-                        })
-        
-        return correlations
-    
-    def get_recommendations(self, summary=None):
-        """توليد توصيات ذكية للعادات والأدوية"""
-        
+    def get_recommendations(self, summary=None, medications_analysis=None):
+        """توليد توصيات عامة"""
         if summary is None:
             summary = self.get_summary()
+        if medications_analysis is None:
+            medications_analysis = self.analyze_medications()
         
         recommendations = []
         
-        # ✅ توصية لتحسين الإنجاز اليومي
+        # توصيات للعادات
         if summary['completion_rate'] < 70 and summary['completion_rate'] > 0:
             recommendations.append({
                 'priority': 'high',
                 'icon': '📋',
-                'category': 'habits',
-                'title': self._t('حافظ على إنجاز عاداتك اليومية', 'Keep Up With Your Daily Habits'),
-                'description': self._t(
-                    f'أنجزت {summary["completed_today"]} من أصل {summary["total_habits"]} عادة اليوم ({summary["completion_rate"]}%)',
-                    f'You completed {summary["completed_today"]} out of {summary["total_habits"]} habits today ({summary["completion_rate"]}%)'
-                ),
-                'actions': [
-                    self._t('حدد وقتاً محدداً لكل عادة', 'Set a specific time for each habit'),
-                    self._t('استخدم التذكيرات', 'Use reminders'),
-                    self._t('ابدأ بعادة صغيرة واحدة فقط', 'Start with just one small habit')
-                ],
+                'title': self._t('حافظ على عاداتك اليومية', 'Keep Your Daily Habits'),
+                'description': self._t(f'التزامك الحالي {summary["completion_rate"]}%', f'Your current adherence is {summary["completion_rate"]}%'),
                 'quick_tip': self._t('الاستمرارية أهم من الكمية', 'Consistency is more important than quantity')
             })
         
-        # ✅ توصية للأدوية
-        if summary['total_medications'] > 0:
-            if summary['medication_adherence'] < 70:
+        # توصيات للأدوية والتفاعلات
+        if medications_analysis['has_medications']:
+            if medications_analysis['interactions_count'] > 0:
                 recommendations.append({
                     'priority': 'high',
-                    'icon': '💊',
-                    'category': 'medication',
-                    'title': self._t('تتبع أدويتك بانتظام', 'Track Your Medications Regularly'),
-                    'description': self._t(
-                        f'لديك {summary["total_medications"]} دواء، نسبة التزامك {summary["medication_adherence"]}%',
-                        f'You have {summary["total_medications"]} medications, adherence is {summary["medication_adherence"]}%'
-                    ),
-                    'actions': [
-                        self._t('سجل الجرعة فور تناولها', 'Log the dose immediately after taking'),
-                        self._t('اضبط منبهاً لتذكيرك', 'Set an alarm to remind you'),
-                        self._t('ضع الأدوية في مكان مرئي', 'Place medications in a visible spot')
-                    ],
-                    'quick_tip': self._t('تناول الأدوية في نفس الوقت يومياً', 'Take medications at the same time daily')
+                    'icon': '⚠️',
+                    'title': self._t('تفاعلات دوائية محتملة', 'Potential Drug Interactions'),
+                    'description': self._t(f'تم اكتشاف {medications_analysis["interactions_count"]} تفاعل محتمل بين أدويتك', 
+                                           f'Found {medications_analysis["interactions_count"]} potential interactions between your medications'),
+                    'quick_tip': self._t('استشر طبيبك حول هذه التفاعلات', 'Consult your doctor about these interactions')
                 })
-            elif summary['medication_adherence'] >= 70 and summary['medication_adherence'] < 100:
+            else:
                 recommendations.append({
-                    'priority': 'medium',
-                    'icon': '💊',
-                    'category': 'medication',
-                    'title': self._t('أداء جيد في الأدوية', 'Good Medication Performance'),
-                    'description': self._t(
-                        f'التزامك بالأدوية {summary["medication_adherence"]}%، استمر',
-                        f'Your medication adherence is {summary["medication_adherence"]}%, keep it up'
-                    ),
-                    'actions': [
-                        self._t('استمر على هذا المستوى', 'Maintain this level'),
-                        self._t('لا تنسَ تسجيل الجرعات', "Don't forget to log your doses")
-                    ],
-                    'quick_tip': self._t('الانتظام يحسن فعالية العلاج', 'Regularity improves treatment effectiveness')
+                    'priority': 'low',
+                    'icon': '✅',
+                    'title': self._t('لا توجد تفاعلات دوائية خطيرة', 'No Serious Drug Interactions'),
+                    'description': self._t('لم نكتشف تفاعلات خطيرة بين أدويتك الحالية', 'No serious interactions detected between your current medications'),
+                    'quick_tip': self._t('استمر في متابعة أدويتك', 'Continue monitoring your medications')
                 })
         
-        # ✅ توصية للسلسلة (Streak)
-        if summary['streak'] > 0 and summary['streak'] < 5:
-            if summary['streak'] == 1:
-                recommendations.append({
-                    'priority': 'medium',
-                    'icon': '🔥',
-                    'category': 'habits',
-                    'title': self._t('بداية جيدة! حافظ على استمراريتك', 'Good Start! Keep Your Streak Going'),
-                    'description': self._t(
-                        f'لديك سلسلة حالية من {summary["streak"]} يوم، حاول الوصول إلى 7 أيام',
-                        f'Your current streak is {summary["streak"]} day, try to reach 7 days'
-                    ),
-                    'actions': [
-                        self._t('لا تفوت يوماً واحداً', "Don't miss a single day"),
-                        self._t('احتفل عند تحقيق 7 أيام', 'Celebrate when you reach 7 days')
-                    ],
-                    'quick_tip': self._t('كل يوم مهم في رحلتك', 'Every day matters in your journey')
-                })
-        elif summary['streak'] >= 5:
+        # توصية عامة للسلسلة
+        if summary['streak'] == 1:
             recommendations.append({
-                'priority': 'low',
-                'icon': '🏆',
-                'category': 'habits',
-                'title': self._t('سلسلة رائعة! استمر', 'Great Streak! Keep Going'),
-                'description': self._t(
-                    f'لديك سلسلة مستمرة لمدة {summary["streak"]} يوم',
-                    f'You have a {summary["streak"]}-day streak'
-                ),
-                'actions': [
-                    self._t('استمر في تحقيق أهدافك اليومية', 'Keep achieving your daily goals'),
-                    self._t('شارك إنجازك مع الأصدقاء', 'Share your achievement with friends')
-                ],
-                'quick_tip': self._t('الاستمرارية تصنع العادات', 'Consistency builds habits')
+                'priority': 'medium',
+                'icon': '🔥',
+                'title': self._t('بداية جيدة! استمر', 'Good Start! Keep Going'),
+                'description': self._t('لديك سلسلة يوم واحد، حاول الوصول إلى 7 أيام', 'You have a 1-day streak, try to reach 7 days'),
+                'quick_tip': self._t('كل يوم مهم في رحلتك', 'Every day matters in your journey')
             })
         
         return recommendations
     
     def get_predictions(self, summary=None):
-        """توليد توقعات بسيطة (بدون ML معقد)"""
-        
+        """توقعات بسيطة"""
         if summary is None:
             summary = self.get_summary()
         
         predictions = []
         
-        # ✅ توقع السلسلة
         if summary['streak'] > 0:
-            predicted_streak = min(7, summary['streak'] + 2) if summary['streak'] < 7 else summary['streak']
+            predicted_streak = min(7, summary['streak'] + 2)
             predictions.append({
                 'icon': '🔥',
-                'category': 'streak',
-                'label': self._t('السلسلة المتوقعة خلال أسبوع', 'Expected streak in 1 week'),
+                'label': self._t('السلسلة المتوقعة', 'Expected Streak'),
                 'value': f"{predicted_streak} {self._t('أيام', 'days')}",
-                'trend': 'up' if predicted_streak > summary['streak'] else 'stable',
-                'trend_text': self._t('استمر هكذا', 'Keep it up'),
-                'note': self._t('مع الالتزام اليومي', 'With daily commitment'),
-                'confidence': 70
+                'trend': 'up'
             })
         
-        # ✅ توقع تحسين الإنجاز
         if summary['completion_rate'] < 100:
-            improvement = min(30, 100 - summary['completion_rate'])
-            future_rate = min(100, summary['completion_rate'] + improvement)
+            future_rate = min(100, summary['completion_rate'] + 15)
             predictions.append({
                 'icon': '📈',
-                'category': 'adherence',
-                'label': self._t('معدل الإنجاز المتوقع', 'Expected completion rate'),
+                'label': self._t('معدل الإنجاز المتوقع', 'Expected Completion'),
                 'value': f"{future_rate}%",
-                'trend': 'up' if future_rate > summary['completion_rate'] else 'stable',
-                'trend_text': self._t('تحسن متوقع مع الاستمرار', 'Expected improvement with consistency'),
-                'note': self._t('حاول تحقيق جميع عاداتك اليومية', 'Try to complete all your daily habits'),
-                'confidence': 75
+                'trend': 'up'
             })
-        
-        # ✅ توقع الالتزام بالأدوية (إذا كانت موجودة)
-        if summary['total_medications'] > 0:
-            if summary['medication_adherence'] < 100:
-                future_adherence = min(100, summary['medication_adherence'] + 15)
-                predictions.append({
-                    'icon': '💊',
-                    'category': 'medication',
-                    'label': self._t('الالتزام بالأدوية المتوقع', 'Expected medication adherence'),
-                    'value': f"{future_adherence}%",
-                    'trend': 'up' if future_adherence > summary['medication_adherence'] else 'stable',
-                    'trend_text': self._t('تحسن مع التذكير', 'Improvement with reminders'),
-                    'note': self._t('سجل أدويتك يومياً', 'Log your medications daily'),
-                    'confidence': 80
-                })
         
         return predictions
     
-    def detect_anomalies(self):
-        """كشف الأيام غير المعتادة (نسخة مبسطة)"""
-        
-        habit_data = self._get_habits_data()
-        df = habit_data['df']
-        
-        if len(df) < 5:
-            return {'status': 'insufficient_data', 'anomalies': [], 'anomalies_count': 0}
-        
-        anomalies = []
-        avg_rate = df['completion_rate'].mean()
-        std_rate = df['completion_rate'].std()
-        
-        for i, row in df.iterrows():
-            rate = row['completion_rate']
-            if rate < avg_rate - (std_rate * 1.5) and rate < 0.3:
-                anomalies.append({
-                    'date': i.strftime('%Y-%m-%d'),
-                    'completion_rate': float(rate * 100),
-                    'anomaly_type': 'low_adherence'
-                })
-        
-        return {
-            'status': 'success',
-            'anomalies_count': len(anomalies),
-            'anomalies': anomalies[:3],
-            'recommendation': self._t(
-                'لاحظنا بعض الأيام التي كان فيها التزامك أقل من المعتاد',
-                'We noticed some days with lower than usual adherence'
-            ) if anomalies else self._t('التزامك جيد ومستقر', 'Your adherence is good and stable')
-        }
-    
-    def get_habit_distribution(self):
-        """تحليل توزيع العادات على مدار الأسبوع (نسخة مبسطة)"""
-        
-        habit_data = self._get_habits_data()
-        df = habit_data['df']
-        
-        if len(df) < 5:
-            return {'status': 'insufficient_data'}
-        
-        weekday_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        weekday_names_ar = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
-        
-        weekday_adherence = {}
-        for day in range(7):
-            day_data = df[df['day_of_week'] == day]
-            if len(day_data) > 0:
-                avg = day_data['completion_rate'].mean() * 100
-                weekday_adherence[weekday_names[day]] = round(avg, 1)
-        
-        best_day = max(weekday_adherence, key=weekday_adherence.get) if weekday_adherence else None
-        worst_day = min(weekday_adherence, key=weekday_adherence.get) if weekday_adherence else None
-        
-        return {
-            'status': 'success',
-            'daily_adherence': weekday_adherence,
-            'best_day': self._t(weekday_names_ar[weekday_names.index(best_day)], best_day) if best_day else None,
-            'worst_day': self._t(weekday_names_ar[weekday_names.index(worst_day)], worst_day) if worst_day else None,
-            'recommendation': self._t(
-                f'أيام {self._t(weekday_names_ar[weekday_names.index(best_day)], best_day) if best_day else ""} هي الأفضل لك' if best_day else '',
-                f'{best_day} are your best days' if best_day else ''
-            ) if best_day else None
-        }
-    
     def get_complete_analysis(self):
-        """الحصول على تحليل كامل للعادات والأدوية (10 أيام)"""
-        
+        """التحليل الكامل"""
         summary = self.get_summary()
+        medications_analysis = self.analyze_medications()
         
         return {
             'summary': summary,
-            'correlations': self.get_correlations(),
-            'recommendations': self.get_recommendations(summary),
-            'predictions': self.get_predictions(summary),
-            'anomalies': self.detect_anomalies(),
-            'distribution': self.get_habit_distribution(),
-            'streak_analysis': {
-                'current_streak': summary['streak'],
-                'best_streak': summary['streak'],
-                'streak_level': self._get_streak_level(summary['streak'])
-            }
+            'medications_analysis': medications_analysis,
+            'recommendations': self.get_recommendations(summary, medications_analysis),
+            'predictions': self.get_predictions(summary)
         }
-    
-    def _get_streak_level(self, streak):
-        """تقييم مستوى السلسلة"""
-        if streak >= 7:
-            return self._t('ممتاز 🔥', 'Excellent 🔥')
-        elif streak >= 3:
-            return self._t('جيد', 'Good')
-        elif streak >= 1:
-            return self._t('بداية جيدة', 'Good start')
-        else:
-            return self._t('يحتاج تحسين', 'Needs improvement')
 
 
 # ==============================================================================
@@ -535,9 +378,7 @@ class HabitMedicationAnalyticsService:
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def habit_medication_analytics_api(request):
-    """
-    API للحصول على تحليلات العادات والأدوية (نسخة خفيفة - 10 أيام فقط)
-    """
+    """API لتحليلات الأدوية - التفاعلات والآثار الجانبية"""
     language = request.GET.get('lang', 'ar')
     
     try:
@@ -546,12 +387,11 @@ def habit_medication_analytics_api(request):
         return Response({
             'success': True,
             'data': result,
-            'is_arabic': language == 'ar',
-            'message': f'تم التحليل بناءً على آخر {result["summary"]["analysis_days"]} أيام'
+            'is_arabic': language == 'ar'
         })
     except Exception as e:
         return Response({
             'success': False,
             'error': str(e),
-            'message': 'حدث خطأ في تحليل العادات' if language == 'ar' else 'Error analyzing habits'
+            'message': 'حدث خطأ في تحليل الأدوية' if language == 'ar' else 'Error analyzing medications'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
