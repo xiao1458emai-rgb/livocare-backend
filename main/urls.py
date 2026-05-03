@@ -25,7 +25,8 @@ from main.views import (
     get_weather, search_food, analyze_sentiment,
     get_comprehensive_analytics_api,
     compare_with_peers,get_recommendations_only,
-    get_smart_recommendations,
+    get_smart_recommendations, get_advanced_analytics,
+    get_predictions_api,
     search_medication, get_medication_details, get_user_medications,
     habit_medication_analytics_api, habit_recommendations_api, habit_predictions_api,
     add_user_medication, delete_user_medication,
@@ -207,7 +208,13 @@ medical_urls = [
     # 🩺 الأمراض المزمنة
     path('user/conditions/', get_user_chronic_conditions, name='user_conditions'),
 ]
-
+# =========================================================
+# ✅ مسارات التحليلات المتقدمة (Advanced Analytics)
+# =========================================================
+advanced_analytics_urls = [
+    path('analytics/advanced/', get_advanced_analytics, name='advanced_analytics'),
+    path('analytics/predictions/', get_predictions_api, name='predictions_api'),
+]
 # =========================================================
 # ✅ دمج جميع المسارات (بدون مسارات مكررة)
 # =========================================================
@@ -221,6 +228,7 @@ urlpatterns = [
     *sentiment_urls,
     *base_urls,
     *medical_urls,
+    *advanced_analytics_urls,
 ]
 
 # =========================================================

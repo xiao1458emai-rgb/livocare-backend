@@ -2753,7 +2753,510 @@ def compare_with_peers(request):
             'error': str(e)
         }, status=500)
 
+# main/views.py - أضف هذه الدوال
 
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import RandomForestRegressor, IsolationForest
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from datetime import timedelta
+from collections import defaultdict
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
+
+
+# ==============================================================================
+# ✅ تحليلات متقدمة باستخدام scikit-learn
+# ==============================================================================
+
+class AdvancedHealthAnalyticsML:
+    """
+    كلاس متقدم لتحليل البيانات الصحية باستخدام scikit-learn
+    """
+    
+    def __init__(self, user, is_arabic=False):
+        self.user = user
+        self.is_arabic = is_arabic
+        self.today = timezone.now().date()
+        self._load_all_data()
+        
+    def _load_all_data(self):
+        """جلب جميع البيانات من النماذج"""
+        from .models import (
+            PhysicalActivity, Sleep, MoodEntry, HealthStatus, 
+            Meal, HabitLog, UserMedication
+        )
+        
+        self.activities = PhysicalActivity.objects.filter(user=self.user).order_by('start_time')
+        self.sleep_records = Sleep.objects.filter(user=self.user).order_by('sleep_start')
+        self.mood_records = MoodEntry.objects.filter(user=self.user).order_by('entry_time')
+        self.health_records = HealthStatus.objects.filter(user=self.user).order_by('recorded_at')
+        self.meals = Meal.objects.filter(user=self.user).order_by('meal_time')
+        self.habit_logs = HabitLog.objects.filter(habit__user=self.user)
+        self.medications_count = UserMedication.objects.filter(user=self.user).count()
+        
+        # معلومات المستخدم
+        self.user_age = self._calculate_age()
+        
+    def _calculate_age(self):
+        """حساب عمر المستخدم"""
+        if hasattr(self.user, 'date_of_birth') and self.user.date_of_birth:
+            today = timezone.now().date()
+            return today.year - self.user.date_of_birth.year - (
+                (today.month, today.day) < (self.user.date_of_birth.month, self.user.date_of_birth.day)
+            )
+        return None
+    
+    def _t(self, ar_text, en_text):
+        return ar_text if self.is_arabic else en_text
+    
+    # ==========================================================================
+    # 1. تحليل الاتجاهات
+    # ==========================================================================
+    
+    def analyze_trends(self):
+        """تحليل اتجاهات البيانات"""
+        trends = {'weight_trend': None, 'activity_trend': None}
+        
+        # اتجاه الوزن
+        if self.health_records.count() >= 5:
+            weights = []
+            days = []
+            for i, record in enumerate(self.health_records):
+                if record.weight_kg:
+                    weights.append(float(record.weight_kg))
+                    days.append(i)
+            
+            if len(weights) >= 5:
+                days_array = np.array(days).reshape(-1, 1)
+                weights_array = np.array(weights)
+                model = LinearRegression()
+                model.fit(days_array, weights_array)
+                slope = model.coef_[0]
+                
+                if abs(slope) > 0.05:
+                    trend = 'increasing' if slope > 0 else 'decreasing'
+                    message = self._t(
+                        f'📈 وزنك في زيادة ({abs(slope):.2f} كجم/أسبوع)' if slope > 0 else f'📉 وزنك في نقصان ({abs(slope):.2f} كجم/أسبوع)',
+                        f'📈 Weight increasing ({abs(slope):.2f} kg/week)' if slope > 0 else f'📉 Weight decreasing ({abs(slope):.2f} kg/week)'
+                    )
+                else:
+                    trend = 'stable'
+                    message = self._t('⚖️ وزنك مستقر', '⚖️ Weight stable')
+                
+                trends['weight_trend'] = {'trend': trend, 'slope': round(slope, 3), 'message': message}
+        
+        # اتجاه النشاط
+        if self.activities.count() >= 5:
+            durations = []
+            days = []
+            for i, act in enumerate(self.activities):
+                durations.append(act.duration_minutes)
+                days.append(i)
+            
+            if len(durations) >= 5:
+                days_array = np.array(days).reshape(-1, 1)
+                durations_array = np.array(durations)
+                model = LinearRegression()
+                model.fit(days_array, durations_array)
+                slope = model.coef_[0]
+                
+                if abs(slope) > 2:
+                    trend = 'increasing' if slope > 0 else 'decreasing'
+                    message = self._t(
+                        f'🏃 نشاطك في تزايد' if slope > 0 else f'⚠️ نشاطك في تناقص',
+                        f'🏃 Activity increasing' if slope > 0 else f'⚠️ Activity decreasing'
+                    )
+                else:
+                    trend = 'stable'
+                    message = self._t('🚶 نشاطك مستقر', '🚶 Activity stable')
+                
+                trends['activity_trend'] = {'trend': trend, 'slope': round(slope, 2), 'message': message}
+        
+        return trends
+    
+    # ==========================================================================
+    # 2. توقعات الوزن
+    # ==========================================================================
+    
+    def predict_weight(self):
+        """توقع الوزن باستخدام Random Forest"""
+        if self.health_records.count() < 7:
+            return None
+        
+        try:
+            data = []
+            for i, record in enumerate(self.health_records):
+                if record.weight_kg:
+                    data.append({
+                        'day': i,
+                        'weight': float(record.weight_kg),
+                        'day_of_week': record.recorded_at.weekday()
+                    })
+            
+            if len(data) < 7:
+                return None
+            
+            df = pd.DataFrame(data)
+            df['weight_lag1'] = df['weight'].shift(1)
+            df['weight_lag3'] = df['weight'].shift(3)
+            df['weight_lag7'] = df['weight'].shift(7)
+            df = df.dropna()
+            
+            if len(df) < 5:
+                return None
+            
+            features = ['day', 'day_of_week', 'weight_lag1', 'weight_lag3', 'weight_lag7']
+            X = df[features].values
+            y = df['weight'].values
+            
+            # تدريب النموذج
+            model = RandomForestRegressor(n_estimators=50, max_depth=5, random_state=42)
+            model.fit(X[:-3], y[:-3])
+            
+            # توقع
+            last_features = X[-3:]
+            predictions = model.predict(last_features)
+            predicted_weight = float(np.mean(predictions))
+            current_weight = float(y[-1])
+            
+            return {
+                'current': round(current_weight, 1),
+                'predicted': round(predicted_weight, 1),
+                'change': round(predicted_weight - current_weight, 1),
+                'trend': 'up' if predicted_weight > current_weight else 'down' if predicted_weight < current_weight else 'stable',
+                'confidence': min(85, 50 + len(df))
+            }
+        except Exception as e:
+            logger.error(f"Weight prediction error: {e}")
+            return None
+    
+    # ==========================================================================
+    # 3. كشف الأنماط الشاذة
+    # ==========================================================================
+    
+    def detect_anomalies(self):
+        """كشف الأنماط الشاذة باستخدام Isolation Forest"""
+        anomalies = {'weight_anomalies': [], 'activity_anomalies': []}
+        
+        # أنماط الوزن الشاذة
+        if self.health_records.count() >= 10:
+            try:
+                weights = []
+                dates = []
+                for record in self.health_records:
+                    if record.weight_kg:
+                        weights.append(float(record.weight_kg))
+                        dates.append(record.recorded_at)
+                
+                if len(weights) >= 10:
+                    weights_array = np.array(weights).reshape(-1, 1)
+                    scaler = StandardScaler()
+                    weights_scaled = scaler.fit_transform(weights_array)
+                    
+                    iso_forest = IsolationForest(contamination=0.1, random_state=42)
+                    predictions = iso_forest.fit_predict(weights_scaled)
+                    
+                    for i, pred in enumerate(predictions):
+                        if pred == -1:
+                            anomalies['weight_anomalies'].append({
+                                'date': dates[i].date().isoformat(),
+                                'value': weights[i],
+                                'type': 'unusual_weight'
+                            })
+            except Exception as e:
+                logger.error(f"Weight anomaly error: {e}")
+        
+        # أنماط النشاط الشاذة
+        if self.activities.count() >= 10:
+            try:
+                durations = [act.duration_minutes for act in self.activities]
+                dates = [act.start_time for act in self.activities]
+                
+                if len(durations) >= 10:
+                    durations_array = np.array(durations).reshape(-1, 1)
+                    scaler = StandardScaler()
+                    durations_scaled = scaler.fit_transform(durations_array)
+                    
+                    iso_forest = IsolationForest(contamination=0.1, random_state=42)
+                    predictions = iso_forest.fit_predict(durations_scaled)
+                    
+                    for i, pred in enumerate(predictions):
+                        if pred == -1:
+                            anomalies['activity_anomalies'].append({
+                                'date': dates[i].date().isoformat(),
+                                'value': durations[i],
+                                'type': 'unusual_activity'
+                            })
+            except Exception as e:
+                logger.error(f"Activity anomaly error: {e}")
+        
+        return anomalies
+    
+    # ==========================================================================
+    # 4. تحليل المجموعات
+    # ==========================================================================
+    
+    def analyze_clusters(self):
+        """تحليل وتصنيف الأيام باستخدام KMeans"""
+        try:
+            daily_features = []
+            date_list = []
+            start_date = self.today - timedelta(days=30)
+            current_date = start_date
+            
+            while current_date <= self.today:
+                # نشاط اليوم
+                day_activities = self.activities.filter(start_time__date=current_date)
+                activity_duration = day_activities.aggregate(Sum('duration_minutes'))['duration_minutes__sum'] or 0
+                
+                # نوم الليلة السابقة
+                sleep = self.sleep_records.filter(sleep_start__date=current_date).first()
+                sleep_hours = 0
+                if sleep and sleep.sleep_end and sleep.sleep_start:
+                    duration = (sleep.sleep_end - sleep.sleep_start).total_seconds() / 3600
+                    sleep_hours = round(duration, 1) if 0 < duration < 24 else 0
+                
+                # مزاج اليوم
+                mood_scores = {'Excellent': 5, 'Good': 4, 'Neutral': 3, 'Stressed': 2, 'Anxious': 2, 'Sad': 1}
+                mood = self.mood_records.filter(entry_time__date=current_date).first()
+                mood_score = mood_scores.get(mood.mood, 0) if mood else 0
+                
+                daily_features.append([activity_duration, sleep_hours, mood_score, current_date.weekday()])
+                date_list.append(current_date)
+                current_date += timedelta(days=1)
+            
+            if len(daily_features) >= 7:
+                scaler = StandardScaler()
+                features_scaled = scaler.fit_transform(daily_features)
+                
+                n_clusters = min(3, len(features_scaled) // 3)
+                if n_clusters >= 2:
+                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                    labels = kmeans.fit_predict(features_scaled)
+                    
+                    clusters = {}
+                    for i, (date, label) in enumerate(zip(date_list, labels)):
+                        if label not in clusters:
+                            clusters[label] = []
+                        clusters[label].append(date.isoformat())
+                    
+                    return {
+                        'has_clusters': True,
+                        'clusters': [
+                            {'cluster_id': int(label), 'days_count': len(dates), 'example_dates': dates[:2]}
+                            for label, dates in clusters.items()
+                        ]
+                    }
+        except Exception as e:
+            logger.error(f"Clustering error: {e}")
+        
+        return {'has_clusters': False}
+    
+    # ==========================================================================
+    # 5. توصيات متقدمة
+    # ==========================================================================
+    
+    def generate_recommendations(self):
+        """توليد توصيات مخصصة"""
+        recommendations = []
+        trends = self.analyze_trends()
+        weight_pred = self.predict_weight()
+        
+        # توصية من اتجاه الوزن
+        if trends.get('weight_trend'):
+            wt = trends['weight_trend']
+            if wt.get('trend') == 'increasing':
+                recommendations.append({
+                    'priority': 'high',
+                    'icon': '⚖️',
+                    'category': 'weight',
+                    'title': self._t('اتجاه زيادة الوزن', 'Weight Increasing'),
+                    'description': wt.get('message', ''),
+                    'advice': self._t('🥗 راجع نظامك الغذائي وزد نشاطك', 'Review your diet and increase activity'),
+                    'based_on': self._t('تحليل الاتجاهات', 'Trend analysis')
+                })
+        
+        # توصية من توقعات الوزن
+        if weight_pred and weight_pred.get('trend') == 'up' and weight_pred.get('change', 0) > 1:
+            recommendations.append({
+                'priority': 'high',
+                'icon': '🔮',
+                'category': 'prediction',
+                'title': self._t('تنبيه: زيادة متوقعة في الوزن', 'Alert: Weight Gain Expected'),
+                'description': self._t(f'من المتوقع زيادة {weight_pred["change"]} كجم خلال أسبوعين', 
+                                      f'Expected increase of {weight_pred["change"]} kg in 2 weeks'),
+                'advice': self._t('📊 ابدأ بتتبع سعراتك وزد نشاطك', 'Start tracking calories and increase activity'),
+                'based_on': self._t('توقعات الذكاء الاصطناعي', 'AI predictions')
+            })
+        
+        # توصيات حسب العمر
+        if self.user_age:
+            if self.user_age >= 50:
+                recommendations.append({
+                    'priority': 'high',
+                    'icon': '🩺',
+                    'category': 'age_specific',
+                    'title': self._t('نصائح لعمر 50+', 'Tips for 50+'),
+                    'description': self._t('ركز على تمارين التوازن والمرونة', 'Focus on balance and flexibility'),
+                    'advice': self._t('🧘 جرب اليوغا أو التمدد 3 مرات أسبوعياً', 'Try yoga or stretching 3 times weekly'),
+                    'based_on': self._t('توصيات حسب العمر', 'Age-specific tips')
+                })
+            elif self.user_age <= 25:
+                recommendations.append({
+                    'priority': 'medium',
+                    'icon': '💪',
+                    'category': 'age_specific',
+                    'title': self._t('بناء عادات صحية مبكرة', 'Build Early Healthy Habits'),
+                    'description': self._t('استثمر في صحتك الآن', 'Invest in your health now'),
+                    'advice': self._t('🏋️ ابدأ بتمارين القوة وحافظ على نوم منتظم', 'Start strength training, maintain regular sleep'),
+                    'based_on': self._t('نصائح وقائية', 'Preventive tips')
+                })
+        
+        # توصية للأدوية
+        if self.medications_count > 0:
+            recommendations.append({
+                'priority': 'low',
+                'icon': '💊',
+                'category': 'medication',
+                'title': self._t('تذكر أدويتك', 'Medication Reminder'),
+                'description': self._t(f'لديك {self.medications_count} دواء مسجل', f'You have {self.medications_count} medications'),
+                'advice': self._t('⏰ اضبط تذكيراً يومياً لأدويتك', 'Set a daily reminder for your medications'),
+                'based_on': self._t('سجل أدويتك', 'Medication record')
+            })
+        
+        return recommendations[:8]
+    
+    # ==========================================================================
+    # 6. التحليل الكامل
+    # ==========================================================================
+    
+    def get_complete_analysis(self):
+        """الحصول على التحليل الكامل"""
+        return {
+            'trends': self.analyze_trends(),
+            'weight_prediction': self.predict_weight(),
+            'anomalies': self.detect_anomalies(),
+            'clusters': self.analyze_clusters(),
+            'recommendations': self.generate_recommendations(),
+            'user_info': {
+                'age': self.user_age,
+                'medications_count': self.medications_count,
+                'health_records_count': self.health_records.count(),
+                'activities_count': self.activities.count()
+            }
+        }
+
+
+# ==============================================================================
+# ✅ دالة تحديث get_comprehensive_analytics_api
+# ==============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_comprehensive_analytics_api(request):
+    """
+    API للتحليلات الصحية الشاملة - باستخدام scikit-learn
+    """
+    try:
+        user = request.user
+        lang = request.GET.get('lang', 'en')
+        is_arabic = lang == 'ar'
+        
+        # تحليل متقدم
+        analytics_engine = AdvancedHealthAnalyticsML(user, is_arabic)
+        advanced = analytics_engine.get_complete_analysis()
+        
+        # بيانات أساسية (آخر 30 يوم)
+        from datetime import timedelta
+        today = timezone.now().date()
+        thirty_days_ago = today - timedelta(days=30)
+        
+        from .models import PhysicalActivity, Sleep, HealthStatus, HabitLog, Meal, MoodEntry
+        
+        activities = PhysicalActivity.objects.filter(user=user, start_time__date__gte=thirty_days_ago)
+        sleep_records = Sleep.objects.filter(user=user, sleep_start__date__gte=thirty_days_ago)
+        health_records = HealthStatus.objects.filter(user=user, recorded_at__date__gte=thirty_days_ago)
+        mood_logs = MoodEntry.objects.filter(user=user, entry_time__date__gte=thirty_days_ago)
+        meals = Meal.objects.filter(user=user, meal_time__date__gte=thirty_days_ago)
+        habit_logs = HabitLog.objects.filter(habit__user=user, log_date__gte=thirty_days_ago)
+        
+        total_activities = activities.count()
+        total_sleep = 0
+        for sleep in sleep_records:
+            if sleep.sleep_end and sleep.sleep_start:
+                duration = (sleep.sleep_end - sleep.sleep_start).total_seconds() / 3600
+                if 0 < duration < 24:
+                    total_sleep += duration
+        avg_sleep = round(total_sleep / sleep_records.count(), 1) if sleep_records.count() > 0 else 0
+        
+        # حساب درجة الصحة
+        score = 50
+        if avg_sleep >= 7:
+            score += 20
+        elif avg_sleep > 0:
+            score += 10
+        
+        if total_activities >= 15:
+            score += 20
+        elif total_activities >= 5:
+            score += 10
+        
+        score = min(100, max(0, score))
+        
+        if score >= 80:
+            category_text = is_arabic and 'ممتازة' or 'Excellent'
+            icon = '🌟'
+        elif score >= 60:
+            category_text = is_arabic and 'جيدة' or 'Good'
+            icon = '👍'
+        elif score >= 40:
+            category_text = is_arabic and 'متوسطة' or 'Fair'
+            icon = '📈'
+        else:
+            category_text = is_arabic and 'تحتاج تحسيناً' or 'Needs Improvement'
+            icon = '⚠️'
+        
+        return Response({
+            'success': True,
+            'data': {
+                'period': {'start': thirty_days_ago.isoformat(), 'end': today.isoformat(), 'days': 30},
+                'summary': {
+                    'total_activities': total_activities,
+                    'avg_sleep_hours': avg_sleep,
+                    'total_meals': meals.count(),
+                    'has_data': total_activities > 0 or sleep_records.exists()
+                },
+                'health_score': {
+                    'total_score': score,
+                    'category_text': category_text,
+                    'icon': icon,
+                    'max_score': 100
+                },
+                'personalized_recommendations': advanced.get('recommendations', []),
+                'predictions': {
+                    'weight_trend': advanced.get('weight_prediction'),
+                    'activity_trend': advanced.get('trends', {}).get('activity_trend')
+                },
+                'trends': advanced.get('trends', {}),
+                'anomalies': advanced.get('anomalies', {}),
+                'clusters': advanced.get('clusters', {})
+            },
+            'is_ml_enhanced': True,
+            'message': is_arabic and '✓ تم التحليل باستخدام scikit-learn' or '✓ Analyzed with scikit-learn'
+        })
+        
+    except Exception as e:
+        logger.error(f"Comprehensive analytics error: {e}")
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': is_arabic and 'حدث خطأ في تحليل البيانات' or 'Error analyzing data'
+        }, status=500)
 
 
 # ==============================================================================
