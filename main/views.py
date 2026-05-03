@@ -3153,7 +3153,10 @@ class AdvancedHealthAnalyticsML:
 
 
 # main/views.py - أضف/استبدل هذه الدوال
-
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework import status
 import numpy as np
 from datetime import timedelta
 from collections import defaultdict
