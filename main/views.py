@@ -2094,94 +2094,14 @@ def refresh_analysis(request):
     return get_health_analysis_api(request)
 ## views.py - النسخة الصحيحة
 
-from django.shortcuts import render
-from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-
-# ✅ استيراد الدالة من الخدمة (وليس الـ class مباشرة)
-from main.services.cross_insights_service import get_health_insights
-
-import json
-
-@login_required
-def health_dashboard(request):
-    """
-    عرض لوحة التحكم الصحية
-    """
-    context = {
-        'page_title': 'لوحة التحليل الصحي الذكي',
-        'user_name': request.user.get_full_name() or request.user.username,
-    }
-    return render(request, 'health/dashboard.html', context)
-
-# main/views.py
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework import status
-from main.services.cross_insights_service import get_health_insights
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_health_analysis_api(request):
-    """
-    API لجلب التحليلات الصحية (AJAX)
-    """
-    language = request.GET.get('lang', 'ar')
-    result = get_health_insights(request.user, language=language)
-    
-    if result.get('success'):
-        return Response({
-            'success': True,
-            'data': result.get('data'),
-            'is_arabic': language == 'ar'
-        })
-    else:
-        return Response({
-            'success': False,
-            'error': result.get('error', 'حدث خطأ في التحليل'),
-            'message': result.get('message', '')
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-@login_required
-def refresh_analysis(request):
-    """
-    تحديث التحليلات (عادةً ما يتم تخزينها في cache)
-    """
-    return get_health_analysis_api(request)
 # main/views.py - أضف هذه الدوال في نهاية الملف
-
-from main.services.exercise_service import get_comprehensive_health_analytics
-from django.core.paginator import Paginator
-from django.db.models import Q
-
-
-# ==============================================================================
-# دوال التحليلات الصحية الشاملة
-# ==============================================================================
-
-@login_required
-def comprehensive_health_analytics_view(request):
-    """
-    عرض صفحة التحليلات الصحية الشاملة
-    """
-    language = request.GET.get('lang', 'ar')
-    context = {
-        'page_title': 'التحليلات الصحية الشاملة' if language == 'ar' else 'Comprehensive Health Analytics',
-        'user_name': request.user.get_full_name() or request.user.username,
-        'language': language,
-    }
-    return render(request, 'health/comprehensive_analytics.html', context)
-# main/views.py - استبدل الدالة بالكامل
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.utils import timezone
 from datetime import timedelta
-from django.db.models import Count, Sum, Q, Avg
+from django.db.models import Sum, Avg, Count
 import logging
 import traceback
 from django.conf import settings
@@ -2197,11 +2117,17 @@ except ImportError as e:
     ML_SERVICE_AVAILABLE = False
     print(f"⚠️ ML service not available: {e}")
 
+
+# ==============================================================================
+# ✅ API الرئيسي للتحليلات الشاملة (SmartRecommendations)
+# ==============================================================================
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_comprehensive_analytics_api(request):
     """
-    API للتحليلات الصحية الشاملة - باستخدام الذكاء الاصطناعي المتقدم
+    API للتحليلات الصحية الشاملة - يستخدم خدمة ML المتقدمة
+    هذا هو الـ endpoint الرئيسي الذي تستخدمه واجهة SmartRecommendations
     """
     try:
         user = request.user
@@ -2216,69 +2142,24 @@ def get_comprehensive_analytics_api(request):
                 if result.get('success'):
                     ml_data = result.get('data', {})
                     
-                    # حساب درجة الصحة
-                    health_score = calculate_advanced_health_score(ml_data, is_arabic)
-                    
-                    # تحويل التوصيات
-                    recommendations = convert_ml_recommendations(
-                        ml_data.get('smart_recommendations', []), 
-                        is_arabic
-                    )
-                    
-                    # الحصول على التوقعات
-                    predictions = ml_data.get('predictions', {})
-                    
-                    # الحصول على الارتباطات
-                    correlations = ml_data.get('correlations', [])
-                    
-                    # الملخص العام
-                    lifetime_summary = ml_data.get('lifetime_summary', {})
-                    activity_summary = lifetime_summary.get('activity_summary', {})
-                    sleep_summary = lifetime_summary.get('sleep_summary', {})
-                    mood_summary = lifetime_summary.get('mood_summary', {})
+                    # ✅ تحويل البيانات إلى الهيكل المتوقع من SmartRecommendations
+                    converted_data = convert_ml_to_smart_recommendations_format(ml_data, is_arabic)
                     
                     return Response({
                         'success': True,
-                        'data': {
-                            'period': {
-                                'start': lifetime_summary.get('tracking_period', {}).get('start_date', ''),
-                                'end': lifetime_summary.get('tracking_period', {}).get('end_date', ''),
-                                'days': lifetime_summary.get('tracking_period', {}).get('total_days', 0)
-                            },
-                            'summary': {
-                                'total_activities': activity_summary.get('total_activities', 0),
-                                'avg_sleep_hours': sleep_summary.get('average_hours', 0),
-                                'avg_mood': mood_summary.get('average_score', 0),
-                                'total_meals': lifetime_summary.get('nutrition_summary', {}).get('total_meals', 0),
-                                'habit_completion_rate': lifetime_summary.get('habits_summary', {}).get('completion_rates', {}),
-                                'has_data': lifetime_summary.get('tracking_period', {}).get('total_days', 0) > 0
-                            },
-                            'health_score': health_score,
-                            'personalized_recommendations': recommendations,
-                            'predictions': {
-                                'weight_trend': predictions.get('weight_trend'),
-                                'mood_forecast': predictions.get('mood_forecast')
-                            },
-                            'correlations': correlations,
-                            'trends': {
-                                'sleep_trend': 'good' if 7 <= sleep_summary.get('average_hours', 0) <= 9 else 'needs_improvement',
-                                'activity_trend': activity_summary.get('actual_activity_level', 'inactive'),
-                                'habits_trend': 'good' if lifetime_summary.get('habits_summary', {}).get('completion_rates') else 'stable'
-                            },
-                            'user_info': ml_data.get('user_info', {})
-                        },
+                        'data': converted_data,
                         'is_ml_enhanced': True,
                         'message': is_arabic and '✓ تم التحليل باستخدام الذكاء الاصطناعي' or '✓ Analyzed with AI'
                     })
                 else:
-                    return get_fallback_analytics(user, is_arabic)
+                    return get_fallback_analytics_response(user, is_arabic)
                     
             except Exception as e:
                 logger.error(f"ML service error: {e}")
                 logger.error(traceback.format_exc())
-                return get_fallback_analytics(user, is_arabic)
+                return get_fallback_analytics_response(user, is_arabic)
         else:
-            return get_fallback_analytics(user, is_arabic)
+            return get_fallback_analytics_response(user, is_arabic)
             
     except Exception as e:
         logger.error(f"Comprehensive analytics error: {e}")
@@ -2289,157 +2170,322 @@ def get_comprehensive_analytics_api(request):
         }, status=500)
 
 
-def calculate_advanced_health_score(ml_data, is_arabic):
+# ==============================================================================
+# ✅ API للتوصيات فقط (للوحة الرئيسية)
+# ==============================================================================
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_recommendations_only(request):
     """
-    حساب درجة الصحة المتقدمة من بيانات ML
+    API للحصول على التوصيات فقط
+    يستخدمه SmartRecommendations في تبويب التوصيات
     """
-    score = 0
-    details = []
+    language = request.GET.get('lang', 'ar')
+    is_arabic = language == 'ar'
+    limit = int(request.GET.get('limit', 10))
     
+    try:
+        if ML_SERVICE_AVAILABLE:
+            result = get_health_insights(request.user, language=language)
+            
+            if result.get('success'):
+                ml_data = result.get('data', {})
+                smart_recs = ml_data.get('smart_recommendations', [])
+                
+                recommendations = []
+                for rec in smart_recs[:limit]:
+                    recommendations.append({
+                        'category': rec.get('category', 'general'),
+                        'priority': rec.get('priority', 'medium'),
+                        'icon': rec.get('icon', '💡'),
+                        'title': rec.get('title', ''),
+                        'description': rec.get('description', ''),
+                        'advice': rec.get('actionable_tip', rec.get('description', '')),
+                        'actions': rec.get('actions', [])
+                    })
+                
+                return Response({
+                    'success': True,
+                    'recommendations': recommendations,
+                    'total': len(smart_recs),
+                    'is_arabic': is_arabic
+                })
+        
+        # Fallback: توصيات بسيطة
+        return get_fallback_recommendations(request.user, is_arabic, limit)
+        
+    except Exception as e:
+        logger.error(f"Recommendations API error: {e}")
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': is_arabic and 'حدث خطأ في جلب التوصيات' or 'Error fetching recommendations'
+        }, status=500)
+
+
+# ==============================================================================
+# ✅ دوال التحويل والتنسيق
+# ==============================================================================
+
+def convert_ml_to_smart_recommendations_format(ml_data, is_arabic):
+    """
+    تحويل بيانات خدمة ML إلى الهيكل المتوقع من SmartRecommendations
+    """
+    lifetime_summary = ml_data.get('lifetime_summary', {})
+    user_info = ml_data.get('user_info', {})
+    predictions = ml_data.get('predictions', {})
+    correlations = ml_data.get('correlations', [])
+    recommendations = ml_data.get('smart_recommendations', [])
+    
+    # ✅ حساب درجة الصحة
+    health_score = calculate_health_score_from_ml(ml_data, is_arabic)
+    
+    # ✅ بناء الهيكل المطلوب
+    return {
+        'profile': {
+            'age': user_info.get('age'),
+            'gender': user_info.get('gender'),
+            'height_cm': user_info.get('height_cm'),
+            'health_goal': user_info.get('health_goal'),
+            'tracking_days': user_info.get('total_tracking_days', 0)
+        },
+        'vital_signs': {
+            'status': 'normal',
+            'last_check': timezone.now().isoformat()
+        },
+        'sleep': {
+            'status': 'good' if lifetime_summary.get('sleep_summary', {}).get('average_hours', 0) >= 7 else 'needs_improvement',
+            'average_hours': lifetime_summary.get('sleep_summary', {}).get('average_hours', 0),
+            'total_nights': lifetime_summary.get('sleep_summary', {}).get('total_nights', 0),
+            'regularity': lifetime_summary.get('sleep_summary', {}).get('regularity', 'moderate')
+        },
+        'mood_mental': {
+            'status': 'good' if lifetime_summary.get('mood_summary', {}).get('average_score', 0) >= 3.5 else 'needs_attention',
+            'average_score': lifetime_summary.get('mood_summary', {}).get('average_score', 0),
+            'total_entries': lifetime_summary.get('mood_summary', {}).get('total_entries', 0)
+        },
+        'activity': {
+            'status': lifetime_summary.get('activity_summary', {}).get('actual_activity_level', 'none'),
+            'activity_level': lifetime_summary.get('activity_summary', {}).get('actual_activity_level', 'none'),
+            'average_daily_minutes': round(lifetime_summary.get('activity_summary', {}).get('avg_weekly_activity', 0) / 7, 1),
+            'total_activities': lifetime_summary.get('activity_summary', {}).get('total_activities', 0)
+        },
+        'nutrition': {
+            'status': 'sufficient' if lifetime_summary.get('nutrition_summary', {}).get('average_calories_per_day', 0) >= 1800 else 'insufficient',
+            'average_daily_calories': lifetime_summary.get('nutrition_summary', {}).get('average_calories_per_day', 0),
+            'total_meals': lifetime_summary.get('nutrition_summary', {}).get('total_meals', 0)
+        },
+        'habits': {
+            'status': 'good' if lifetime_summary.get('habits_summary', {}).get('completion_rates') else 'no_data',
+            'total_habits': lifetime_summary.get('habits_summary', {}).get('total_habits', 0),
+            'best_habit': lifetime_summary.get('habits_summary', {}).get('best_habit')
+        },
+        'executive_summary': generate_executive_summary_from_ml(ml_data, is_arabic),
+        'health_score': health_score,
+        'patterns_correlations': {
+            'correlations': convert_correlations_to_dict(correlations),
+            'insights': [c.get('description', '') for c in correlations]
+        },
+        'personalized_recommendations': [
+            {
+                'category': rec.get('category', 'general'),
+                'priority': rec.get('priority', 'medium'),
+                'icon': rec.get('icon', '💡'),
+                'title': rec.get('title', ''),
+                'description': rec.get('description', ''),
+                'advice': rec.get('actionable_tip', rec.get('description', ''))
+            }
+            for rec in recommendations[:10]
+        ],
+        'predictions': {
+            'weight': {
+                'current': predictions.get('weight_trend', {}).get('current'),
+                'predictions': [predictions.get('weight_trend', {}).get('predicted_2weeks')] if predictions.get('weight_trend', {}).get('predicted_2weeks') else [],
+                'trend': predictions.get('weight_trend', {}).get('trend', 'stable'),
+                'confidence': predictions.get('weight_trend', {}).get('confidence', 70)
+            },
+            'mood': {
+                'current': lifetime_summary.get('mood_summary', {}).get('average_score', 0),
+                'trend': predictions.get('mood_forecast', {}).get('trend', 'stable'),
+                'message': predictions.get('mood_forecast', {}).get('message', '')
+            }
+        }
+    }
+
+
+def calculate_health_score_from_ml(ml_data, is_arabic):
+    """حساب درجة الصحة من بيانات ML"""
     lifetime_summary = ml_data.get('lifetime_summary', {})
     
-    # 1. النشاط البدني (25 نقطة)
-    activity_summary = lifetime_summary.get('activity_summary', {})
-    activity_level = activity_summary.get('actual_activity_level', 'none')
+    score = 0
+    components = {}
     
+    # النشاط البدني (30 نقطة)
+    activity_level = lifetime_summary.get('activity_summary', {}).get('actual_activity_level', 'none')
     if activity_level == 'high':
-        score += 25
-        details.append({'factor': is_arabic and 'النشاط البدني' or 'Physical Activity', 'points': 25, 'status': 'good'})
+        score += 30
+        components['activity'] = 30
     elif activity_level == 'medium':
-        score += 15
-        details.append({'factor': is_arabic and 'النشاط البدني' or 'Physical Activity', 'points': 15, 'status': 'medium'})
+        score += 20
+        components['activity'] = 20
     elif activity_level == 'low':
-        score += 8
-        details.append({'factor': is_arabic and 'النشاط البدني' or 'Physical Activity', 'points': 8, 'status': 'low'})
+        score += 10
+        components['activity'] = 10
     else:
-        details.append({'factor': is_arabic and 'النشاط البدني' or 'Physical Activity', 'points': 0, 'status': 'none'})
+        components['activity'] = 0
     
-    # 2. النوم (25 نقطة)
+    # النوم (25 نقطة)
     avg_sleep = lifetime_summary.get('sleep_summary', {}).get('average_hours', 0)
     if 7 <= avg_sleep <= 9:
         score += 25
-        details.append({'factor': is_arabic and 'النوم' or 'Sleep', 'points': 25, 'status': 'good'})
+        components['sleep'] = 25
     elif 6 <= avg_sleep < 7 or 9 < avg_sleep <= 10:
         score += 15
-        details.append({'factor': is_arabic and 'النوم' or 'Sleep', 'points': 15, 'status': 'medium'})
+        components['sleep'] = 15
     elif avg_sleep > 0:
         score += 5
-        details.append({'factor': is_arabic and 'النوم' or 'Sleep', 'points': 5, 'status': 'low'})
+        components['sleep'] = 5
     else:
-        details.append({'factor': is_arabic and 'النوم' or 'Sleep', 'points': 0, 'status': 'none'})
+        components['sleep'] = 0
     
-    # 3. تقدم الوزن (20 نقطة)
-    weight_summary = lifetime_summary.get('weight_summary', {})
-    weight_trend = weight_summary.get('trend', 'stable')
-    health_goal = ml_data.get('user_info', {}).get('health_goal')
-    
-    if weight_trend == 'stable':
-        score += 20
-        details.append({'factor': is_arabic and 'استقرار الوزن' or 'Weight Stability', 'points': 20, 'status': 'good'})
-    elif (health_goal == 'loss' and weight_trend == 'losing') or (health_goal == 'gain' and weight_trend == 'gaining'):
-        score += 15
-        details.append({'factor': is_arabic and 'تقدم نحو الهدف' or 'Goal Progress', 'points': 15, 'status': 'medium'})
-    else:
-        score += 8
-        details.append({'factor': is_arabic and 'تحكم الوزن' or 'Weight Control', 'points': 8, 'status': 'low'})
-    
-    # 4. العادات (15 نقطة)
-    habits_summary = lifetime_summary.get('habits_summary', {})
-    completion_rates = habits_summary.get('completion_rates', {})
-    
+    # العادات (20 نقطة)
+    completion_rates = lifetime_summary.get('habits_summary', {}).get('completion_rates', {})
     if completion_rates:
         avg_rate = sum(completion_rates.values()) / len(completion_rates)
         if avg_rate >= 80:
-            score += 15
-            details.append({'factor': is_arabic and 'العادات' or 'Habits', 'points': 15, 'status': 'good'})
+            score += 20
+            components['habits'] = 20
         elif avg_rate >= 50:
-            score += 10
-            details.append({'factor': is_arabic and 'العادات' or 'Habits', 'points': 10, 'status': 'medium'})
+            score += 12
+            components['habits'] = 12
         else:
             score += 5
-            details.append({'factor': is_arabic and 'العادات' or 'Habits', 'points': 5, 'status': 'low'})
+            components['habits'] = 5
     else:
-        details.append({'factor': is_arabic and 'العادات' or 'Habits', 'points': 0, 'status': 'none'})
+        components['habits'] = 0
     
-    # 5. المزاج (15 نقطة)
+    # المزاج (15 نقطة)
     avg_mood = lifetime_summary.get('mood_summary', {}).get('average_score', 0)
     if avg_mood >= 4:
         score += 15
-        details.append({'factor': is_arabic and 'الحالة المزاجية' or 'Mood', 'points': 15, 'status': 'good'})
+        components['mood'] = 15
     elif avg_mood >= 3:
         score += 10
-        details.append({'factor': is_arabic and 'الحالة المزاجية' or 'Mood', 'points': 10, 'status': 'medium'})
+        components['mood'] = 10
     elif avg_mood > 0:
         score += 5
-        details.append({'factor': is_arabic and 'الحالة المزاجية' or 'Mood', 'points': 5, 'status': 'low'})
+        components['mood'] = 5
     else:
-        details.append({'factor': is_arabic and 'الحالة المزاجية' or 'Mood', 'points': 0, 'status': 'none'})
+        components['mood'] = 0
     
-    # تحديد المستوى
-    if score >= 80:
-        level = 'excellent'
-        level_text = is_arabic and 'ممتازة' or 'Excellent'
-        grade = 'A'
-    elif score >= 65:
-        level = 'good'
-        level_text = is_arabic and 'جيدة' or 'Good'
-        grade = 'B'
-    elif score >= 50:
-        level = 'fair'
-        level_text = is_arabic and 'متوسطة' or 'Fair'
-        grade = 'C'
-    elif score >= 35:
-        level = 'poor'
-        level_text = is_arabic and 'تحتاج تحسيناً' or 'Needs Improvement'
-        grade = 'D'
+    # نظام غذائي (10 نقاط)
+    avg_calories = lifetime_summary.get('nutrition_summary', {}).get('average_calories_per_day', 0)
+    if 1800 <= avg_calories <= 2500:
+        score += 10
+        components['nutrition'] = 10
+    elif avg_calories > 0:
+        score += 5
+        components['nutrition'] = 5
     else:
-        level = 'critical'
-        level_text = is_arabic and 'حرجة' or 'Critical'
-        grade = 'F'
+        components['nutrition'] = 0
+    
+    # تحديد الفئة
+    if score >= 80:
+        category = 'excellent'
+        category_text = is_arabic and 'ممتازة' or 'Excellent'
+    elif score >= 60:
+        category = 'good'
+        category_text = is_arabic and 'جيدة' or 'Good'
+    elif score >= 40:
+        category = 'fair'
+        category_text = is_arabic and 'متوسطة' or 'Fair'
+    else:
+        category = 'poor'
+        category_text = is_arabic and 'تحتاج تحسيناً' or 'Needs Improvement'
     
     return {
-        'score': score,
-        'level': level,
-        'level_text': level_text,
-        'grade': grade,
-        'details': details,
+        'total_score': score,
+        'category': category,
+        'category_text': category_text,
+        'components': components,
         'max_score': 100
     }
 
 
-def convert_ml_recommendations(ml_recs, is_arabic):
-    """تحويل توصيات ML إلى الصيغة المتوقعة"""
-    converted = []
-    for rec in ml_recs:
-        converted.append({
-            'category': rec.get('category', 'general'),
-            'priority': rec.get('priority', 'medium'),
-            'icon': rec.get('icon', '💡'),
-            'title': rec.get('title', ''),
-            'description': rec.get('description', ''),
-            'advice': rec.get('actionable_tip', rec.get('description', ''))
-        })
-    return converted
+def convert_correlations_to_dict(correlations):
+    """تحويل قائمة الارتباطات إلى قاموس"""
+    result = {}
+    for corr in correlations:
+        title = corr.get('title', '')
+        if 'النشاط والنوم' in title or 'Activity & Sleep' in title:
+            result['activity_sleep'] = corr.get('strength', 0.5)
+        elif 'العادات والمزاج' in title or 'Habits & Mood' in title:
+            result['habits_mood'] = corr.get('strength', 0.5)
+        elif 'النوم والمزاج' in title or 'Sleep & Mood' in title:
+            result['sleep_mood'] = corr.get('strength', 0.5)
+        elif 'النشاط والمزاج' in title or 'Activity & Mood' in title:
+            result['activity_mood'] = corr.get('strength', 0.5)
+    return result
 
 
-def get_fallback_analytics(user, is_arabic):
-    """
-    تحليلات احتياطية (fallback) في حالة عدم توفر خدمة ML
-    """
-    from django.utils import timezone
-    from datetime import timedelta
-    from django.db.models import Sum, Avg
+def generate_executive_summary_from_ml(ml_data, is_arabic):
+    """توليد ملخص تنفيذي ذكي"""
+    lifetime_summary = ml_data.get('lifetime_summary', {})
+    activity_summary = lifetime_summary.get('activity_summary', {})
+    sleep_summary = lifetime_summary.get('sleep_summary', {})
+    weight_summary = lifetime_summary.get('weight_summary', {})
+    habits_summary = lifetime_summary.get('habits_summary', {})
+    tracking_days = lifetime_summary.get('tracking_period', {}).get('total_days', 0)
+    
+    parts = []
+    
+    if tracking_days > 0:
+        parts.append(f"📊 أنت تتابع صحتك منذ {tracking_days} يوماً." if is_arabic else f"📊 You've been tracking for {tracking_days} days.")
+    
+    activity_level = activity_summary.get('actual_activity_level', 'none')
+    if activity_level == 'high':
+        parts.append("🏃 مستوى نشاطك ممتاز! استمر." if is_arabic else "🏃 Your activity level is excellent! Keep it up.")
+    elif activity_level == 'low':
+        parts.append("🚶 يحتاج نشاطك إلى تحسين. ابدأ بالمشي 10 دقائق يومياً." if is_arabic else "🚶 Your activity needs improvement. Start with 10 min walking daily.")
+    
+    avg_sleep = sleep_summary.get('average_hours', 0)
+    if 7 <= avg_sleep <= 9:
+        parts.append("😴 نومك ممتاز!" if is_arabic else "😴 Your sleep is excellent!")
+    elif avg_sleep > 0:
+        parts.append(f"😴 متوسط نومك {avg_sleep} ساعات." if is_arabic else f"😴 Your average sleep is {avg_sleep} hours.")
+    
+    best_habit = habits_summary.get('best_habit')
+    if best_habit:
+        rate = habits_summary.get('completion_rates', {}).get(best_habit, 0)
+        parts.append(f"🌟 عادة \"{best_habit}\" هي الأفضل لديك بنسبة {rate}%." if is_arabic else f"🌟 Habit \"{best_habit}\" is your best at {rate}%.")
+    
+    if tracking_days < 14:
+        parts.append("🌱 بداية رائعة! استمر في التسجيل." if is_arabic else "🌱 Great start! Keep logging.")
+    else:
+        parts.append("💪 استمر في تحقيق أهدافك!" if is_arabic else "💪 Keep achieving your goals!")
+    
+    return "\n\n".join(parts)
+
+
+# ==============================================================================
+# ✅ دوال Fallback (عند عدم توفر خدمة ML)
+# ==============================================================================
+
+def get_fallback_analytics_response(user, is_arabic):
+    """رد احتياطي عندما لا تتوفر خدمة ML"""
     from .models import PhysicalActivity, Sleep, HealthStatus, HabitLog, HabitDefinition
+    from datetime import timedelta
+    from django.utils import timezone
     
     today = timezone.now().date()
     thirty_days_ago = today - timedelta(days=30)
     
-    # جلب البيانات الأساسية
     activities = PhysicalActivity.objects.filter(user=user, start_time__date__gte=thirty_days_ago)
     sleep_records = Sleep.objects.filter(user=user, sleep_start__date__gte=thirty_days_ago)
     health_records = HealthStatus.objects.filter(user=user, recorded_at__date__gte=thirty_days_ago)
-    habit_logs = HabitLog.objects.filter(habit__user=user, log_date__gte=thirty_days_ago)
     habits = HabitDefinition.objects.filter(user=user, is_active=True)
+    habit_logs = HabitLog.objects.filter(habit__user=user, log_date__gte=thirty_days_ago)
     
     total_activities = activities.count()
     
@@ -2457,27 +2503,78 @@ def get_fallback_analytics(user, is_arabic):
     completed_count = habit_logs.filter(is_completed=True).count()
     habit_rate = round((completed_count / habit_count) * 100, 1) if habit_count > 0 else 0
     
-    # حساب الوزن المثالي
-    user_height = getattr(user, 'height', None)
-    ideal_weight = None
-    if user_height:
-        user_gender = getattr(user, 'gender', 'M')
-        height_cm = float(user_height)
-        if user_gender == 'M':
-            ideal_weight = 52 + 1.9 * (height_cm - 152.4)
-        else:
-            ideal_weight = 49 + 1.7 * (height_cm - 152.4)
-        ideal_weight = round(ideal_weight, 1)
-    
-    latest_weight = None
-    if health_records.exists():
-        latest = health_records.first()
-        latest_weight = float(latest.weight_kg) if latest.weight_kg else None
-    
     # حساب درجة الصحة
-    health_score = calculate_basic_health_score(total_activities, avg_sleep, habit_rate, is_arabic)
+    score = 50
+    if 7 <= avg_sleep <= 9:
+        score += 25
+    elif avg_sleep > 0:
+        score += 10
     
-    # بناء التوصيات
+    if total_activities >= 15:
+        score += 25
+    elif total_activities >= 5:
+        score += 15
+    elif total_activities > 0:
+        score += 5
+    
+    if habit_rate >= 70:
+        score += 20
+    elif habit_rate >= 40:
+        score += 10
+    
+    score = min(100, max(0, score))
+    
+    if score >= 80:
+        category = 'excellent'
+        category_text = is_arabic and 'ممتازة' or 'Excellent'
+    elif score >= 60:
+        category = 'good'
+        category_text = is_arabic and 'جيدة' or 'Good'
+    elif score >= 40:
+        category = 'fair'
+        category_text = is_arabic and 'متوسطة' or 'Fair'
+    else:
+        category = 'poor'
+        category_text = is_arabic and 'تحتاج تحسيناً' or 'Needs Improvement'
+    
+    return Response({
+        'success': True,
+        'data': {
+            'profile': {'tracking_days': 30},
+            'sleep': {'average_hours': avg_sleep, 'status': 'good' if avg_sleep >= 7 else 'needs_improvement'},
+            'mood_mental': {'average_score': 3, 'status': 'good'},
+            'activity': {'total_activities': total_activities, 'activity_level': 'moderate' if total_activities >= 5 else 'low'},
+            'health_score': {'total_score': score, 'category': category, 'category_text': category_text, 'components': {}, 'max_score': 100},
+            'personalized_recommendations': [],
+            'executive_summary': is_arabic and 'تحليل أساسي. سجل المزيد من البيانات للحصول على توصيات متقدمة.' or 'Basic analysis. Log more data for advanced insights.'
+        },
+        'is_ml_enhanced': False,
+        'message': is_arabic and '⚠️ تحليلات أساسية (النسخة المتقدمة قيد التفعيل)' or '⚠️ Basic analytics (Advanced version activating)'
+    })
+
+
+def get_fallback_recommendations(user, is_arabic, limit=5):
+    """رد احتياطي للتوصيات"""
+    from .models import PhysicalActivity, Sleep
+    from datetime import timedelta
+    from django.utils import timezone
+    
+    today = timezone.now().date()
+    thirty_days_ago = today - timedelta(days=30)
+    
+    activities = PhysicalActivity.objects.filter(user=user, start_time__date__gte=thirty_days_ago)
+    sleep_records = Sleep.objects.filter(user=user, sleep_start__date__gte=thirty_days_ago)
+    
+    total_activities = activities.count()
+    
+    total_sleep = 0
+    for sleep in sleep_records:
+        if sleep.sleep_end and sleep.sleep_start:
+            duration = (sleep.sleep_end - sleep.sleep_start).total_seconds() / 3600
+            if 0 < duration < 24:
+                total_sleep += duration
+    avg_sleep = round(total_sleep / sleep_records.count(), 1) if sleep_records.count() > 0 else 0
+    
     recommendations = []
     
     if avg_sleep > 0 and avg_sleep < 7:
@@ -2490,139 +2587,126 @@ def get_fallback_analytics(user, is_arabic):
             'advice': is_arabic and 'حاول النوم 7-8 ساعات يومياً' or 'Try to sleep 7-8 hours daily'
         })
     
-    if ideal_weight and latest_weight and latest_weight > ideal_weight:
-        weight_diff = round(latest_weight - ideal_weight, 1)
-        recommendations.append({
-            'category': 'weight',
-            'priority': 'high',
-            'icon': '⚖️',
-            'title': is_arabic and 'خسارة الوزن الصحية' or 'Healthy Weight Loss',
-            'description': is_arabic and f'تحتاج لخسارة {weight_diff} كجم للوصول للوزن المثالي' or f'Need to lose {weight_diff} kg to reach ideal weight',
-            'advice': is_arabic and 'قلل 300-500 سعرة حرارية يومياً مع زيادة النشاط' or 'Reduce 300-500 calories daily with increased activity'
-        })
-    
     if total_activities < 8:
         recommendations.append({
             'category': 'activity',
             'priority': 'high',
             'icon': '🏃',
             'title': is_arabic and 'زيادة النشاط البدني' or 'Increase Physical Activity',
-            'description': is_arabic and f'سجلت {total_activities} نشاط في آخر 30 يوم' or f'You recorded {total_activities} activities in last 30 days',
-            'advice': is_arabic and 'امشِ 30 دقيقة يومياً لمدة 5 أيام في الأسبوع' or 'Walk 30 minutes daily for 5 days a week'
-        })
-    
-    if habit_rate < 50 and habit_rate > 0:
-        recommendations.append({
-            'category': 'habits',
-            'priority': 'medium',
-            'icon': '✅',
-            'title': is_arabic and 'تحسين إنجاز العادات' or 'Improve Habit Completion',
-            'description': is_arabic and f'نسبة إنجاز العادات {habit_rate}%' or f'Habit completion rate is {habit_rate}%',
-            'advice': is_arabic and 'حدد عادة واحدة صغيرة والتزم بها يومياً' or 'Pick one small habit and stick to it daily'
-        })
-    
-    # توقعات بسيطة
-    predictions = []
-    if total_activities > 0:
-        predictions.append({
-            'label': is_arabic and 'النشاط المتوقع' or 'Expected Activity',
-            'value': f"{min(30, total_activities + 5)} {is_arabic and 'نشاط' or 'activities'}",
-            'trend': 'up',
-            'confidence': 70
-        })
-    
-    if avg_sleep > 0:
-        predicted_sleep = min(9, avg_sleep + 0.5)
-        predictions.append({
-            'label': is_arabic and 'النوم المتوقع' or 'Expected Sleep',
-            'value': f"{predicted_sleep} {is_arabic and 'ساعات' or 'hours'}",
-            'trend': 'up' if predicted_sleep > avg_sleep else 'stable',
-            'confidence': 65
+            'description': is_arabic and f'سجلت {total_activities} نشاط في آخر 30 يوم' or f'You recorded {total_activities} activities',
+            'advice': is_arabic and 'امشِ 30 دقيقة يومياً' or 'Walk 30 minutes daily'
         })
     
     return Response({
         'success': True,
-        'data': {
-            'period': {'start': thirty_days_ago.isoformat(), 'end': today.isoformat(), 'days': 30},
-            'summary': {
-                'total_activities': total_activities,
-                'avg_sleep_hours': avg_sleep,
-                'habit_completion_rate': habit_rate,
-                'total_meals': 0,
-                'has_data': total_activities > 0 or sleep_records.exists() or health_records.exists()
-            },
-            'health_score': health_score,
-            'personalized_recommendations': recommendations,
-            'predictions': {'weight_trend': None, 'mood_forecast': None, 'basic': predictions},
-            'correlations': [],
-            'trends': {
-                'sleep_trend': 'good' if 7 <= avg_sleep <= 9 else 'needs_improvement' if avg_sleep > 0 else 'unknown',
-                'activity_trend': 'active' if total_activities >= 15 else 'moderate' if total_activities >= 5 else 'inactive',
-                'habits_trend': 'improving' if habit_rate > 70 else 'stable' if habit_rate > 40 else 'needs_attention'
-            }
-        },
-        'is_ml_enhanced': False,
-        'message': is_arabic and '⚠️ تحليلات أساسية (النسخة المتقدمة قيد التفعيل)' or '⚠️ Basic analytics (Advanced version activating)'
+        'recommendations': recommendations[:limit],
+        'total': len(recommendations),
+        'is_arabic': is_arabic
     })
 
 
-def calculate_basic_health_score(total_activities, avg_sleep, habit_rate, is_arabic):
-    """حساب درجة الصحة الأساسية"""
-    score = 0
-    
-    # نشاط بدني (35 نقطة)
-    if total_activities >= 20:
-        score += 35
-    elif total_activities >= 10:
-        score += 25
-    elif total_activities >= 5:
-        score += 15
-    elif total_activities > 0:
-        score += 5
-    
-    # نوم (35 نقطة)
-    if 7 <= avg_sleep <= 9:
-        score += 35
-    elif 6 <= avg_sleep < 7 or 9 < avg_sleep <= 10:
-        score += 20
-    elif avg_sleep > 0:
-        score += 8
-    
-    # عادات (30 نقطة)
-    if habit_rate >= 80:
-        score += 30
-    elif habit_rate >= 50:
-        score += 20
-    elif habit_rate >= 25:
-        score += 10
-    elif habit_rate > 0:
-        score += 5
-    
-    # تحديد المستوى
-    if score >= 80:
-        level_text = is_arabic and 'ممتازة' or 'Excellent'
-        grade = 'A'
-    elif score >= 65:
-        level_text = is_arabic and 'جيدة' or 'Good'
-        grade = 'B'
-    elif score >= 50:
-        level_text = is_arabic and 'متوسطة' or 'Fair'
-        grade = 'C'
-    elif score >= 35:
-        level_text = is_arabic and 'تحتاج تحسيناً' or 'Needs Improvement'
-        grade = 'D'
-    else:
-        level_text = is_arabic and 'حرجة' or 'Critical'
-        grade = 'F'
-    
-    return {
-        'score': score,
-        'level_text': level_text,
-        'grade': grade,
-        'max_score': 100
-    }
 
-
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_recommendations_only(request):
+    """API للحصول على التوصيات فقط (للوحة الرئيسية)"""
+    language = request.GET.get('lang', 'ar')
+    is_arabic = language == 'ar'
+    limit = int(request.GET.get('limit', 5))
+    
+    try:
+        # محاولة استخدام خدمة ML
+        try:
+            from .services.cross_insights_service import get_health_insights
+            result = get_health_insights(request.user, language=language)
+            
+            if result.get('success'):
+                ml_data = result.get('data', {})
+                smart_recs = ml_data.get('smart_recommendations', [])
+                
+                recommendations = []
+                for rec in smart_recs[:limit]:
+                    recommendations.append({
+                        'category': rec.get('category', 'general'),
+                        'priority': rec.get('priority', 'medium'),
+                        'icon': rec.get('icon', '💡'),
+                        'title': rec.get('title', ''),
+                        'description': rec.get('description', ''),
+                        'advice': rec.get('actionable_tip', rec.get('description', ''))
+                    })
+                
+                return Response({
+                    'success': True,
+                    'recommendations': recommendations,
+                    'total': len(smart_recs),
+                    'is_arabic': is_arabic
+                })
+        except ImportError:
+            pass
+        
+        # Fallback: توصيات بسيطة
+        from .models import PhysicalActivity, Sleep
+        from datetime import timedelta
+        from django.utils import timezone
+        
+        today = timezone.now().date()
+        thirty_days_ago = today - timedelta(days=30)
+        
+        activities = PhysicalActivity.objects.filter(
+            user=request.user, 
+            start_time__date__gte=thirty_days_ago
+        )
+        sleep_records = Sleep.objects.filter(
+            user=request.user,
+            sleep_start__date__gte=thirty_days_ago
+        )
+        
+        total_activities = activities.count()
+        
+        # حساب النوم
+        total_sleep = 0
+        for sleep in sleep_records:
+            if sleep.sleep_end and sleep.sleep_start:
+                duration = (sleep.sleep_end - sleep.sleep_start).total_seconds() / 3600
+                if 0 < duration < 24:
+                    total_sleep += duration
+        avg_sleep = round(total_sleep / sleep_records.count(), 1) if sleep_records.count() > 0 else 0
+        
+        recommendations = []
+        
+        if avg_sleep > 0 and avg_sleep < 7:
+            recommendations.append({
+                'category': 'sleep',
+                'priority': 'high',
+                'icon': '😴',
+                'title': is_arabic and 'تحسين جودة النوم' or 'Improve Sleep Quality',
+                'description': is_arabic and f'متوسط نومك {avg_sleep} ساعات' or f'Your average sleep is {avg_sleep} hours',
+                'advice': is_arabic and 'حاول النوم 7-8 ساعات يومياً' or 'Try to sleep 7-8 hours daily'
+            })
+        
+        if total_activities < 8:
+            recommendations.append({
+                'category': 'activity',
+                'priority': 'high',
+                'icon': '🏃',
+                'title': is_arabic and 'زيادة النشاط البدني' or 'Increase Physical Activity',
+                'description': is_arabic and f'سجلت {total_activities} نشاط في آخر 30 يوم' or f'You recorded {total_activities} activities in last 30 days',
+                'advice': is_arabic and 'امشِ 30 دقيقة يومياً لمدة 5 أيام في الأسبوع' or 'Walk 30 minutes daily for 5 days a week'
+            })
+        
+        return Response({
+            'success': True,
+            'recommendations': recommendations[:limit],
+            'total': len(recommendations),
+            'is_arabic': is_arabic
+        })
+        
+    except Exception as e:
+        return Response({
+            'success': False,
+            'error': str(e),
+            'message': is_arabic and 'حدث خطأ في جلب التوصيات' or 'Error fetching recommendations'
+        }, status=500)
 # ==============================================================================
 # دوال المقارنة مع المستخدمين الآخرين (اختياري)
 # ==============================================================================

@@ -25,7 +25,7 @@ from main.views import (
     get_weather, search_food, analyze_sentiment,
     comprehensive_health_analytics_view,
     get_comprehensive_analytics_api,
-    compare_with_peers,
+    compare_with_peers,get_recommendations_only,
     get_smart_recommendations,
     search_medication, get_medication_details, get_user_medications,
     habit_medication_analytics_api, habit_recommendations_api, habit_predictions_api,
@@ -174,9 +174,8 @@ habit_analytics_urls = [
 # ✅ مسارات التحليلات الشاملة (Comprehensive Analytics)
 # =========================================================
 comprehensive_analytics_urls = [
-    path('analytics/comprehensive/', comprehensive_health_analytics_view, name='comprehensive_analytics'),
     path('analytics/comprehensive/api/', get_comprehensive_analytics_api, name='comprehensive_analytics_api'),
-    path('analytics/compare/', compare_with_peers, name='analytics_compare'),
+    path('analytics/recommendations/', get_recommendations_only, name='analytics_recommendations'),
 ]
 
 # =========================================================
