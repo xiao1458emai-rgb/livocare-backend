@@ -1,5 +1,5 @@
 """
-خدمة تحليلات العادات والأدوية المتقدمة - نسخة خفيفة (10 أيام فقط)
+خدمة تحليلات العادات والأدوية المتقدمة - نسخة خفيفة (10 أيام فقط) - مصححة
 """
 
 import numpy as np
@@ -38,7 +38,7 @@ class HabitMedicationAnalyticsService:
         self.week_ago = self.today - timedelta(days=7)
         
         # ✅ تغيير جوهري: 10 أيام فقط بدلاً من 30/60/90
-        self.analysis_days = 10  # ✅ فقط 10 أيام
+        self.analysis_days = 10
         self.analysis_start = self.today - timedelta(days=self.analysis_days)
         
         # نماذج ML
@@ -55,9 +55,44 @@ class HabitMedicationAnalyticsService:
                 return text
         return text
     
+    def _is_medication(self, habit):
+        """✅ دالة مساعدة لتحديد إذا كانت العادة دواء أم لا"""
+        # التحقق من localStorage عبر الـ type (يتم تعيينه في الواجهة)
+        # ولكن في الخلفية، نعتمد على الكلمات المفتاحية والأيقونات
+        
+        text = (habit.name + ' ' + (habit.description or '')).lower()
+        
+        # كلمات مفتاحية للأدوية
+        medication_keywords = [
+            'دواء', 'medication', 'حبة', 'pill', 'علاج', 'treatment',
+            'ibuprofen', 'paracetamol', 'advil', 'tylenol', 'aspirin',
+            'metformin', 'lisinopril', 'amlodipine', 'atorvastatin',
+            'simvastatin', 'oxytocin', 'pitocin', 'valproate',
+            'amitriptyline', 'propranolol', 'mg', 'ملجم', 'جرعة', 'dose',
+            'injection', 'tablet', 'capsule', 'syrup', 'suspension'
+        ]
+        
+        # أيقونات الدواء في الوصف
+        medication_icons = ['💊', '🏭', '💉', '📦', '🔢']
+        
+        for keyword in medication_keywords:
+            if keyword in text:
+                return True
+        
+        for icon in medication_icons:
+            if icon in (habit.description or ''):
+                return True
+        
+        return False
+    
     def _get_habits_data(self):
         """جلب بيانات العادات للتحليل (آخر 10 أيام فقط)"""
-        habits = HabitDefinition.objects.filter(user=self.user, is_active=True)
+        all_habits = HabitDefinition.objects.filter(user=self.user, is_active=True)
+        
+        # ✅ تقسيم العادات إلى عادات وأدوية
+        habits = [h for h in all_habits if not self._is_medication(h)]
+        medications = [h for h in all_habits if self._is_medication(h)]
+        
         habit_logs = HabitLog.objects.filter(
             habit__user=self.user,
             log_date__gte=self.analysis_start.date()
@@ -67,7 +102,7 @@ class HabitMedicationAnalyticsService:
         dates = pd.date_range(start=self.analysis_start.date(), end=self.today_date, freq='D')
         df = pd.DataFrame(index=dates)
         
-        # إضافة أعمدة للعادات
+        # إضافة أعمدة للعادات فقط (وليس الأدوية)
         for habit in habits:
             habit_logs_filtered = habit_logs.filter(habit=habit)
             completed_series = []
@@ -81,52 +116,54 @@ class HabitMedicationAnalyticsService:
         df['is_weekend'] = df['day_of_week'].isin([5, 6]).astype(int)
         
         # إضافة معدلات الالتزام
-        if habits.exists():
-            df['completion_rate'] = df[habits.values_list('name', flat=True)].mean(axis=1)
+        if habits:
+            df['completion_rate'] = df[[h.name for h in habits]].mean(axis=1)
         else:
             df['completion_rate'] = 0
         
         return {
             'df': df,
             'habits': habits,
+            'medications': medications,
             'habit_logs': habit_logs,
-            'total_habits': habits.count(),
+            'total_habits': len(habits),
+            'total_medications': len(medications),
             'total_logs': habit_logs.count()
         }
     
     def get_summary(self):
         """الحصول على ملخص العادات والأدوية (آخر 10 أيام)"""
         
-        habits = HabitDefinition.objects.filter(user=self.user, is_active=True)
+        habit_data = self._get_habits_data()
+        habits = habit_data['habits']
+        medications = habit_data['medications']
         
         # ✅ سجلات آخر 10 أيام فقط
-        habit_logs = HabitLog.objects.filter(
-            habit__user=self.user,
-            log_date__gte=self.analysis_start.date()
-        )
+        habit_logs = habit_data['habit_logs']
         
-        # الأدوية النشطة
-        active_medications = UserMedication.objects.filter(
+        # ✅ الأدوية النشطة من UserMedication (إن وجدت)
+        active_medications_db = UserMedication.objects.filter(
             user=self.user,
             start_date__lte=self.today_date
         ).filter(Q(end_date__isnull=True) | Q(end_date__gte=self.today_date))
         
-        # سجلات الأدوية من العادات
-        med_habits = habits.filter(name__icontains='دواء')
-        med_logs = habit_logs.filter(habit__in=med_habits) if med_habits.exists() else []
+        # ✅ إجمالي الأدوية = أدوية من العادات + أدوية من UserMedication
+        total_medications = len(medications) + active_medications_db.count()
         
-        total_habits = habits.count()
+        total_habits = len(habits)
         completed_today = habit_logs.filter(log_date=self.today_date, is_completed=True).count()
         completion_rate = round((completed_today / total_habits) * 100) if total_habits > 0 else 0
         
-        # حساب الالتزام بالأدوية (آخر 10 أيام)
+        # ✅ حساب الالتزام بالأدوية (من سجلات الأدوية فقط)
         med_adherence = 0
-        if med_habits.exists() and med_logs.exists():
-            med_completed = med_logs.filter(is_completed=True).count()
+        if medications:
+            med_logs = habit_logs.filter(habit__in=medications)
             med_total = med_logs.count()
-            med_adherence = round((med_completed / med_total) * 100) if med_total > 0 else 0
+            if med_total > 0:
+                med_completed = med_logs.filter(is_completed=True).count()
+                med_adherence = round((med_completed / med_total) * 100)
         
-        # أقوى عادة وأضعف عادة
+        # ✅ أقوى عادة وأضعف عادة (من العادات فقط، وليس الأدوية)
         habit_completion = {}
         for habit in habits:
             logs = habit_logs.filter(habit=habit)
@@ -140,7 +177,8 @@ class HabitMedicationAnalyticsService:
         
         return {
             'total_habits': total_habits,
-            'active_medications': active_medications.count(),
+            'total_medications': total_medications,  # ✅ اسم واضح
+            'active_medications': total_medications,
             'completed_today': completed_today,
             'completion_rate': completion_rate,
             'medication_adherence': med_adherence,
@@ -152,15 +190,19 @@ class HabitMedicationAnalyticsService:
         }
     
     def _calculate_current_streak(self, habit_logs):
-        """حساب السلسلة الحالية (Streak)"""
+        """حساب السلسلة الحالية (Streak) - بناءً على العادات فقط"""
         if not habit_logs.exists():
             return 0
+        
+        # ✅ استخدام العادات فقط في حساب السلسلة
+        habit_data = self._get_habits_data()
+        habit_ids = [h.id for h in habit_data['habits']]
         
         streak = 0
         current_date = self.today_date
         
-        for _ in range(self.analysis_days):  # ✅ فقط خلال أيام التحليل
-            day_logs = habit_logs.filter(log_date=current_date)
+        for _ in range(self.analysis_days):
+            day_logs = habit_logs.filter(log_date=current_date, habit_id__in=habit_ids)
             if day_logs.exists() and day_logs.filter(is_completed=True).exists():
                 streak += 1
                 current_date -= timedelta(days=1)
@@ -176,7 +218,7 @@ class HabitMedicationAnalyticsService:
         habit_data = self._get_habits_data()
         df = habit_data['df']
         
-        if len(df) < 3:  # ✅ أقل من 3 أيام فقط
+        if len(df) < 3:
             return correlations
         
         # بيانات النوم (آخر 10 أيام)
@@ -250,15 +292,16 @@ class HabitMedicationAnalyticsService:
                 'quick_tip': self._t('الاستمرارية أهم من الكمية', 'Consistency is more important than quantity')
             })
         
-        if summary['medication_adherence'] < 80 and summary['medication_adherence'] > 0:
+        # ✅ توصية للأدوية فقط إذا كان هناك أدوية والتزام منخفض
+        if summary['total_medications'] > 0 and summary['medication_adherence'] < 80:
             recommendations.append({
                 'priority': 'high',
                 'icon': '💊',
                 'category': 'medication',
                 'title': self._t('تحسين الالتزام بالأدوية', 'Improve Medication Adherence'),
                 'description': self._t(
-                    f'التزامك بالأدوية {summary["medication_adherence"]}%',
-                    f'Your medication adherence is {summary["medication_adherence"]}%'
+                    f'لديك {summary["total_medications"]} دواء، التزامك الحالي {summary["medication_adherence"]}%',
+                    f'You have {summary["total_medications"]} medications, adherence is {summary["medication_adherence"]}%'
                 ),
                 'actions': [
                     self._t('تناول الدواء في نفس الوقت يومياً', 'Take medication at the same time daily'),
@@ -361,6 +404,7 @@ class HabitMedicationAnalyticsService:
             return {'status': 'insufficient_data'}
         
         weekday_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        weekday_names_ar = ['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
         
         weekday_adherence = {}
         for day in range(7):
@@ -375,10 +419,10 @@ class HabitMedicationAnalyticsService:
         return {
             'status': 'success',
             'daily_adherence': weekday_adherence,
-            'best_day': best_day,
-            'worst_day': worst_day,
+            'best_day': self._t(weekday_names_ar[weekday_names.index(best_day)], best_day) if best_day else None,
+            'worst_day': self._t(weekday_names_ar[weekday_names.index(worst_day)], worst_day) if worst_day else None,
             'recommendation': self._t(
-                f'أيام {best_day} هي الأفضل لك' if best_day else '',
+                f'أيام {self._t(weekday_names_ar[weekday_names.index(best_day)], best_day) if best_day else ""} هي الأفضل لك' if best_day else '',
                 f'{best_day} are your best days' if best_day else ''
             ) if best_day else None
         }
