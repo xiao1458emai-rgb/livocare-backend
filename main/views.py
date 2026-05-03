@@ -2190,7 +2190,7 @@ logger = logging.getLogger(__name__)
 
 # ✅ استيراد خدمة التحليلات المتقدمة
 try:
-    from .services.cross_insights_ml_service import get_health_insights
+    from .services.cross_insights_service import get_health_insights
     ML_SERVICE_AVAILABLE = True
     print("✅ ML service loaded successfully")
 except ImportError as e:

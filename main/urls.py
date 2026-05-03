@@ -25,10 +25,6 @@ from main.views import (
     get_weather, search_food, analyze_sentiment,
     comprehensive_health_analytics_view,
     get_comprehensive_analytics_api,
-    get_analytics_summary,
-    get_recommendations_only,
-    refresh_comprehensive_analytics,
-    export_analytics_report,
     compare_with_peers,
     get_smart_recommendations,
     search_medication, get_medication_details, get_user_medications,
@@ -180,10 +176,6 @@ habit_analytics_urls = [
 comprehensive_analytics_urls = [
     path('analytics/comprehensive/', comprehensive_health_analytics_view, name='comprehensive_analytics'),
     path('analytics/comprehensive/api/', get_comprehensive_analytics_api, name='comprehensive_analytics_api'),
-    path('analytics/summary/', get_analytics_summary, name='analytics_summary'),
-    path('analytics/recommendations/', get_recommendations_only, name='analytics_recommendations'),
-    path('analytics/refresh/', refresh_comprehensive_analytics, name='analytics_refresh'),
-    path('analytics/export/', export_analytics_report, name='analytics_export'),
     path('analytics/compare/', compare_with_peers, name='analytics_compare'),
 ]
 
