@@ -3152,28 +3152,235 @@ class AdvancedHealthAnalyticsML:
         }
 
 
+# main/views.py - أضف/استبدل هذه الدوال
+
+import numpy as np
+from datetime import timedelta
+from collections import defaultdict
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 # ==============================================================================
-# ✅ دوال API للتحليلات المتقدمة
+# ✅ تحليلات متقدمة مبسطة (بدون scikit-learn)
 # ==============================================================================
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_advanced_analytics(request):
     """
-    API للتحليلات الصحية المتقدمة باستخدام scikit-learn
+    تحليلات متقدمة مبسطة باستخدام numpy فقط
     """
     language = request.GET.get('lang', 'ar')
     is_arabic = language == 'ar'
     
     try:
-        analytics_engine = AdvancedHealthAnalyticsML(request.user, is_arabic)
-        analysis = analytics_engine.get_complete_analysis()
+        user = request.user
+        
+        # جلب البيانات
+        from .models import PhysicalActivity, Sleep, HealthStatus, HabitLog
+        
+        # ========== تحليل الاتجاهات ==========
+        trends = {}
+        
+        # اتجاه الوزن
+        health_records = HealthStatus.objects.filter(
+            user=user, 
+            weight_kg__isnull=False
+        ).order_by('recorded_at')
+        
+        if health_records.count() >= 5:
+            weights = []
+            days = []
+            for i, record in enumerate(health_records):
+                weights.append(float(record.weight_kg))
+                days.append(i)
+            
+            if len(weights) >= 5:
+                # انحدار خطي بسيط
+                days_array = np.array(days)
+                weights_array = np.array(weights)
+                n = len(days)
+                
+                mean_x = np.mean(days_array)
+                mean_y = np.mean(weights_array)
+                
+                numerator = np.sum((days_array - mean_x) * (weights_array - mean_y))
+                denominator = np.sum((days_array - mean_x) ** 2)
+                
+                if denominator != 0:
+                    slope = numerator / denominator
+                    
+                    if abs(slope) > 0.05:
+                        trend = 'increasing' if slope > 0 else 'decreasing'
+                        message = is_arabic and (
+                            f'📈 وزنك في زيادة بمعدل {abs(slope):.2f} كجم/أسبوع' if slope > 0 else 
+                            f'📉 وزنك في نقصان بمعدل {abs(slope):.2f} كجم/أسبوع'
+                        ) or (
+                            f'📈 Weight increasing by {abs(slope):.2f} kg/week' if slope > 0 else 
+                            f'📉 Weight decreasing by {abs(slope):.2f} kg/week'
+                        )
+                    else:
+                        trend = 'stable'
+                        message = is_arabic and '⚖️ وزنك مستقر' or '⚖️ Weight stable'
+                    
+                    trends['weight_trend'] = {
+                        'trend': trend,
+                        'slope': round(slope, 3),
+                        'message': message
+                    }
+        
+        # اتجاه النشاط
+        activities = PhysicalActivity.objects.filter(user=user).order_by('start_time')
+        
+        if activities.count() >= 5:
+            durations = []
+            days = []
+            for i, act in enumerate(activities):
+                durations.append(act.duration_minutes)
+                days.append(i)
+            
+            if len(durations) >= 5:
+                days_array = np.array(days)
+                durations_array = np.array(durations)
+                mean_x = np.mean(days_array)
+                mean_y = np.mean(durations_array)
+                
+                numerator = np.sum((days_array - mean_x) * (durations_array - mean_y))
+                denominator = np.sum((days_array - mean_x) ** 2)
+                
+                if denominator != 0:
+                    slope = numerator / denominator
+                    
+                    if abs(slope) > 2:
+                        trend = 'increasing' if slope > 0 else 'decreasing'
+                        message = is_arabic and (
+                            '🏃 نشاطك في تزايد' if slope > 0 else '⚠️ نشاطك في تناقص'
+                        ) or (
+                            '🏃 Activity increasing' if slope > 0 else '⚠️ Activity decreasing'
+                        )
+                    else:
+                        trend = 'stable'
+                        message = is_arabic and '🚶 نشاطك مستقر' or '🚶 Activity stable'
+                    
+                    trends['activity_trend'] = {
+                        'trend': trend,
+                        'slope': round(slope, 2),
+                        'message': message
+                    }
+        
+        # ========== توقع الوزن البسيط ==========
+        weight_prediction = None
+        if health_records.count() >= 7:
+            weights = [float(r.weight_kg) for r in health_records if r.weight_kg]
+            if len(weights) >= 7:
+                recent_weights = weights[-7:]
+                current_weight = recent_weights[-1]
+                
+                # متوسط التغير في آخر 7 أيام
+                changes = [recent_weights[i] - recent_weights[i-1] for i in range(1, len(recent_weights))]
+                if changes:
+                    avg_change = sum(changes) / len(changes)
+                    predicted_weight = current_weight + avg_change * 14  # توقع بعد أسبوعين
+                    
+                    weight_prediction = {
+                        'current': round(current_weight, 1),
+                        'predicted': round(predicted_weight, 1),
+                        'change': round(predicted_weight - current_weight, 1),
+                        'trend': 'up' if predicted_weight > current_weight else 'down' if predicted_weight < current_weight else 'stable',
+                        'confidence': min(85, 50 + len(weights))
+                    }
+        
+        # ========== كشف الأنماط الشاذة (بسيط) ==========
+        anomalies = {'weight_anomalies': [], 'activity_anomalies': []}
+        
+        # أنماط الوزن الشاذة
+        if health_records.count() >= 10:
+            weights = [float(r.weight_kg) for r in health_records if r.weight_kg]
+            if len(weights) >= 10:
+                mean_weight = np.mean(weights)
+                std_weight = np.std(weights)
+                threshold = 2 * std_weight
+                
+                for i, record in enumerate(health_records):
+                    if record.weight_kg and abs(float(record.weight_kg) - mean_weight) > threshold:
+                        anomalies['weight_anomalies'].append({
+                            'date': record.recorded_at.date().isoformat(),
+                            'value': float(record.weight_kg),
+                            'type': 'unusual_weight'
+                        })
+        
+        # أنماط النشاط الشاذة
+        if activities.count() >= 10:
+            durations = [a.duration_minutes for a in activities]
+            if len(durations) >= 10:
+                mean_duration = np.mean(durations)
+                std_duration = np.std(durations)
+                threshold = 2 * std_duration
+                
+                for act in activities:
+                    if abs(act.duration_minutes - mean_duration) > threshold:
+                        anomalies['activity_anomalies'].append({
+                            'date': act.start_time.date().isoformat(),
+                            'value': act.duration_minutes,
+                            'type': 'unusual_activity'
+                        })
+        
+        # ========== تحليل الأيام (بسيط) ==========
+        clusters = {'has_clusters': False}
+        
+        # ========== توصيات ==========
+        recommendations = []
+        
+        if trends.get('weight_trend', {}).get('trend') == 'increasing':
+            recommendations.append({
+                'priority': 'high',
+                'icon': '⚖️',
+                'category': 'weight',
+                'title': is_arabic and 'اتجاه زيادة الوزن' or 'Weight Increasing',
+                'description': trends['weight_trend'].get('message', ''),
+                'advice': is_arabic and '🥗 راجع نظامك الغذائي وزد نشاطك' or '🥗 Review your diet and increase activity',
+                'based_on': is_arabic and 'تحليل الاتجاهات' or 'Trend analysis'
+            })
+        
+        if weight_prediction and weight_prediction.get('trend') == 'up' and weight_prediction.get('change', 0) > 1:
+            recommendations.append({
+                'priority': 'high',
+                'icon': '🔮',
+                'category': 'prediction',
+                'title': is_arabic and 'تنبيه: زيادة متوقعة في الوزن' or 'Alert: Weight Gain Expected',
+                'description': is_arabic and f'من المتوقع زيادة {abs(weight_prediction["change"])} كجم خلال أسبوعين' or f'Expected increase of {abs(weight_prediction["change"])} kg in 2 weeks',
+                'advice': is_arabic and '📊 ابدأ بتتبع سعراتك وزد نشاطك' or '📊 Start tracking calories and increase activity',
+                'based_on': is_arabic and 'توقعات الذكاء الاصطناعي' or 'AI predictions'
+            })
+        
+        # توصيات حسب كمية البيانات
+        if health_records.count() < 10:
+            recommendations.append({
+                'priority': 'medium',
+                'icon': '📊',
+                'category': 'general',
+                'title': is_arabic and 'سجل المزيد من البيانات' or 'Log More Data',
+                'description': is_arabic and f'لديك {health_records.count()} تسجيل صحي، سجل المزيد للحصول على تحليلات أعمق' or f'You have {health_records.count()} health records, log more for deeper insights',
+                'advice': is_arabic and '📝 سجل وزنك ونشاطك يومياً' or '📝 Log your weight and activity daily',
+                'based_on': is_arabic and 'جودة البيانات' or 'Data quality'
+            })
         
         return Response({
             'success': True,
-            'data': analysis,
-            'is_arabic': is_arabic,
-            'message': is_arabic and '✓ تم التحليل باستخدام الذكاء الاصطناعي' or '✓ Analyzed with AI'
+            'data': {
+                'trends': trends,
+                'weight_prediction': weight_prediction,
+                'anomalies': anomalies,
+                'clusters': clusters,
+                'recommendations': recommendations,
+                'user_info': {
+                    'health_records_count': health_records.count(),
+                    'activities_count': activities.count()
+                }
+            },
+            'is_arabic': is_arabic
         })
         
     except Exception as e:
@@ -3184,7 +3391,6 @@ def get_advanced_analytics(request):
             'message': is_arabic and 'حدث خطأ في التحليل المتقدم' or 'Error in advanced analysis'
         }, status=500)
 
-# main/views.py - استبدل دالة get_predictions_api بهذه النسخة
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -3196,46 +3402,51 @@ def get_predictions_api(request):
     is_arabic = language == 'ar'
     
     try:
-        analytics_engine = AdvancedHealthAnalyticsML(request.user, is_arabic)
-        weight_pred = analytics_engine.predict_weight()
+        user = request.user
+        from .models import HealthStatus
+        
+        health_records = HealthStatus.objects.filter(
+            user=user, 
+            weight_kg__isnull=False
+        ).order_by('recorded_at')
         
         predictions = []
         
-        if weight_pred:
-            # تحديد نص الاتجاه
-            if weight_pred['trend'] == 'up':
-                trend_text = 'زيادة متوقعة' if is_arabic else 'Expected increase'
-            elif weight_pred['trend'] == 'down':
-                trend_text = 'نقصان متوقع' if is_arabic else 'Expected decrease'
-            else:
-                trend_text = 'مستقر' if is_arabic else 'Stable'
-            
-            predictions.append({
-                'icon': '⚖️',
-                'label': is_arabic and 'الوزن المتوقع بعد أسبوعين' or 'Expected weight in 2 weeks',
-                'value': f"{weight_pred['predicted']} kg",
-                'trend': weight_pred['trend'],
-                'trend_text': trend_text,
-                'note': is_arabic and f"التغيير المتوقع: {abs(weight_pred['change'])} كجم" or f"Expected change: {abs(weight_pred['change'])} kg",
-                'confidence': weight_pred.get('confidence', 70)
-            })
+        # توقع الوزن
+        if health_records.count() >= 7:
+            weights = [float(r.weight_kg) for r in health_records]
+            if len(weights) >= 7:
+                recent_weights = weights[-7:]
+                current_weight = recent_weights[-1]
+                changes = [recent_weights[i] - recent_weights[i-1] for i in range(1, len(recent_weights))]
+                
+                if changes:
+                    avg_change = sum(changes) / len(changes)
+                    predicted_weight = current_weight + avg_change * 14
+                    
+                    predictions.append({
+                        'icon': '⚖️',
+                        'label': is_arabic and 'الوزن المتوقع بعد أسبوعين' or 'Expected weight in 2 weeks',
+                        'value': f"{round(predicted_weight, 1)} kg",
+                        'trend': 'up' if predicted_weight > current_weight else 'down' if predicted_weight < current_weight else 'stable',
+                        'confidence': min(80, 50 + len(weights)),
+                        'note': is_arabic and f"الحالي: {round(current_weight, 1)} كجم" or f"Current: {round(current_weight, 1)} kg"
+                    })
         
         return Response({
             'success': True,
             'predictions': predictions,
-            'is_arabic': is_arabic,
-            'has_predictions': len(predictions) > 0
+            'has_predictions': len(predictions) > 0,
+            'is_arabic': is_arabic
         })
         
     except Exception as e:
         logger.error(f"Predictions API error: {e}")
-        logger.error(traceback.format_exc())
         return Response({
             'success': False,
             'error': str(e),
             'message': is_arabic and 'حدث خطأ في جلب التوقعات' or 'Error fetching predictions'
         }, status=500)
-
 # ==============================================================================
 # ✅ دالة تحديث get_comprehensive_analytics_api
 # ==============================================================================
