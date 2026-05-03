@@ -149,14 +149,12 @@ class HabitMedicationAnalyticsService:
         
         total_habits = len(habits)
         
-        # ✅ تصحيح: حساب الإنجاز اليومي بشكل صحيح (نسبة مئوية)
+        # ✅ تصحيح: حساب الإنجاز اليومي (من العادات فقط)
         today_logs = habit_logs.filter(log_date=self.today_date)
-        completed_today_count = today_logs.filter(is_completed=True).count()
+        completed_today_habits = today_logs.filter(habit__in=habits, is_completed=True).count()
+        completion_rate = round((completed_today_habits / total_habits) * 100) if total_habits > 0 else 0
         
-        # ✅ النسبة المئوية محسوبة من إجمالي العادات (وليس الأدوية)
-        completion_rate = round((completed_today_count / total_habits) * 100) if total_habits > 0 else 0
-        
-        # ✅ حساب الالتزام بالأدوية (من سجلات الأدوية فقط)
+        # ✅ حساب الالتزام بالأدوية من سجلات الأدوية فقط
         med_adherence = 0
         if medications:
             med_logs = habit_logs.filter(habit__in=medications)
@@ -165,9 +163,12 @@ class HabitMedicationAnalyticsService:
                 med_completed = med_logs.filter(is_completed=True).count()
                 med_adherence = round((med_completed / med_total) * 100)
             else:
-                med_adherence = 0  # لا توجد سجلات أدوية
+                med_adherence = 0
         
-        # ✅ أقوى عادة وأضعف عادة (من العادات فقط، وليس الأدوية)
+        # ✅ إضافة إجمالي العناصر اليومية المكتملة (للعرض)
+        completed_today_total = today_logs.filter(is_completed=True).count()
+        
+        # ✅ أقوى عادة وأضعف عادة
         habit_completion = {}
         for habit in habits:
             logs = habit_logs.filter(habit=habit)
@@ -177,9 +178,8 @@ class HabitMedicationAnalyticsService:
                 habit_completion[habit.name] = round((completed / total) * 100) if total > 0 else 0
         
         best_habit = max(habit_completion, key=habit_completion.get) if habit_completion else None
-        worst_habit = min(habit_completion, key=habit_completion.get) if habit_completion else None
         
-        # ✅ حساب السلسلة (Streak) - فقط للعادات، وليس الأدوية
+        # ✅ حساب السلسلة (Streak)
         streak = 0
         current_date = self.today_date
         habit_ids = [h.id for h in habits]
@@ -196,11 +196,11 @@ class HabitMedicationAnalyticsService:
             'total_habits': total_habits,
             'total_medications': total_medications,
             'active_medications': total_medications,
-            'completed_today': completed_today_count,
-            'completion_rate': completion_rate,
-            'medication_adherence': med_adherence,
+            'completed_today_habits': completed_today_habits,  # ✅ فقط العادات
+            'completed_today_total': completed_today_total,    # ✅ العادات + الأدوية
+            'completion_rate': completion_rate,               # ✅ نسبة العادات فقط
+            'medication_adherence': med_adherence,            # ✅ نسبة الأدوية فقط
             'best_habit': best_habit,
-            'worst_habit': worst_habit,
             'habit_completion_rates': habit_completion,
             'streak': streak,
             'analysis_days': self.analysis_days
