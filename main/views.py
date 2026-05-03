@@ -3096,8 +3096,6 @@ def analyze_with_context_api(request):
 def get_mood_insights_api(request):
     """
     الحصول على رؤى وتحليلات من سجلات المزاج
-    
-    GET /api/sentiment/mood-insights/
     """
     try:
         language = request.GET.get('lang', 'ar')
@@ -3105,7 +3103,7 @@ def get_mood_insights_api(request):
         # جلب سجلات المزاج من قاعدة البيانات
         from main.models import MoodEntry
         
-        mood_entries = MoodEntry.objects.filter(user=request.user).order_by('-entry_time')[:30]
+        mood_entries = MoodEntry.objects.filter(user=request.user).order_by('-entry_time')[:50]
         
         mood_data = []
         for entry in mood_entries:
@@ -3125,11 +3123,133 @@ def get_mood_insights_api(request):
                 }
             })
         
-        insights = get_sentiment_insights(mood_data, language=language)
+        # ✅ تحسين: حساب الإحصائيات حتى بدون نصوص
+        from collections import Counter
+        
+        # إحصائيات توزيع المزاج
+        moods_list = [entry['mood'] for entry in mood_data]
+        mood_counts = Counter(moods_list)
+        
+        # تصنيف المشاعر كمشاعر إيجابية/سلبية
+        positive_moods = ['Excellent', 'Good']
+        negative_moods = ['Stressed', 'Anxious', 'Sad']
+        
+        positive_count = sum(mood_counts.get(mood, 0) for mood in positive_moods)
+        negative_count = sum(mood_counts.get(mood, 0) for mood in negative_moods)
+        neutral_count = mood_counts.get('Neutral', 0)
+        total = len(mood_data)
+        
+        most_common_mood = mood_counts.most_common(1)[0][0] if mood_counts else 'Neutral'
+        
+        # ترجمة المزاج الأكثر شيوعاً
+        mood_map = {
+            'Excellent': 'ممتاز', 'Good': 'جيد', 'Neutral': 'محايد',
+            'Stressed': 'مرهق', 'Anxious': 'قلق', 'Sad': 'حزين'
+        }
+        most_common_mood_ar = mood_map.get(most_common_mood, most_common_mood)
+        
+        # تحليل النصوص إذا وجدت
+        texts = [entry.get('text_entry', '') for entry in mood_data if entry.get('text_entry')]
+        
+        if texts:
+            # استخدام تحليل API للنصوص
+            tracker = SentimentTracker(language=language)
+            sentiment_results = tracker.analyze_batch(texts)
+            overall = tracker.get_overall_sentiment(sentiment_results)
+            trend = tracker.get_trend_analysis(sentiment_results)
+        else:
+            # ✅ إذا لم توجد نصوص، استخدم إحصائيات المزاج
+            positive_rate = (positive_count / total * 100) if total > 0 else 0
+            
+            overall = {
+                'positive': positive_count,
+                'negative': negative_count,
+                'neutral': neutral_count,
+                'total': total,
+                'positive_rate': round(positive_rate, 1),
+                'avg_score': round((positive_count * 5 + neutral_count * 3 + negative_count * 2) / total, 2) if total > 0 else 0,
+                'overall': 'إيجابي' if positive_count > negative_count else 'سلبي' if negative_count > positive_count else 'متوازن'
+            }
+            
+            # اتجاه بسيط (مقارنة آخر 7 أيام مع السابقة)
+            trend = {
+                'trend': 'insufficient_data',
+                'message': 'البيانات غير كافية للتحليل، سجل المزيد من المشاعر' if language == 'ar' else 'Insufficient data for analysis, log more sentiments',
+                'recent_positive_rate': positive_rate,
+                'older_positive_rate': 0,
+                'change': 0,
+                'period_days': 7
+            }
+            
+            # إذا كان هناك بيانات كافية، احسب الاتجاه
+            if len(mood_data) >= 7:
+                # ترتيب حسب التاريخ
+                sorted_data = sorted(mood_data, key=lambda x: x['entry_time'], reverse=True)
+                recent_7 = sorted_data[:7]
+                older_7 = sorted_data[7:14] if len(sorted_data) >= 14 else []
+                
+                recent_positive = sum(1 for e in recent_7 if e['mood'] in positive_moods)
+                recent_rate = (recent_positive / len(recent_7)) * 100
+                
+                if older_7:
+                    older_positive = sum(1 for e in older_7 if e['mood'] in positive_moods)
+                    older_rate = (older_positive / len(older_7)) * 100
+                    change = recent_rate - older_rate
+                    
+                    if change > 15:
+                        trend['trend'] = 'improving'
+                        trend['message'] = '📈 ملاحظة تحسن في مشاعرك خلال الفترة الأخيرة، استمر!' if language == 'ar' else '📈 Noticeable improvement in your mood recently, keep it up!'
+                    elif change < -15:
+                        trend['trend'] = 'declining'
+                        trend['message'] = '📉 انخفاض ملحوظ في مشاعرك، اهتم بصحتك النفسية' if language == 'ar' else '📉 Noticeable decline in your mood, take care of your mental health'
+                    else:
+                        trend['trend'] = 'stable'
+                        trend['message'] = '➡️ حالة مزاجية مستقرة، يمكنك العمل على تحسينها' if language == 'ar' else '➡️ Stable mood, you can work on improving it'
+                    
+                    trend['recent_positive_rate'] = round(recent_rate, 1)
+                    trend['older_positive_rate'] = round(older_rate, 1)
+                    trend['change'] = round(change, 1)
+        
+        # ✅ تحسين توقع المزاج
+        from datetime import datetime, timedelta
+        
+        # حساب متوسط المزاج للأيام الأخيرة
+        recent_moods = mood_data[:7]
+        mood_scores = {
+            'Excellent': 5, 'Good': 4, 'Neutral': 3,
+            'Stressed': 2, 'Anxious': 2, 'Sad': 1
+        }
+        
+        avg_score = sum(mood_scores.get(e['mood'], 3) for e in recent_moods) / len(recent_moods) if recent_moods else 3
+        
+        # توقع المزاج بناءً على الاتجاه
+        predicted_score = avg_score
+        if trend.get('trend') == 'improving':
+            predicted_score = min(5, avg_score + 0.3)
+        elif trend.get('trend') == 'declining':
+            predicted_score = max(1, avg_score - 0.3)
+        
+        mood_levels = {'ar': ['سيء', 'متوسط', 'جيد', 'جيد جداً', 'ممتاز'], 'en': ['Poor', 'Fair', 'Good', 'Very Good', 'Excellent']}
+        level_index = min(4, max(0, int(predicted_score) - 1))
+        
+        prediction = {
+            'score': round(predicted_score, 1),
+            'level': mood_levels[language][level_index],
+            'trend': 'up' if trend.get('trend') == 'improving' else 'down' if trend.get('trend') == 'declining' else 'stable'
+        }
         
         return Response({
             'success': True,
-            'data': insights,
+            'data': {
+                'has_data': True,
+                'total_entries': len(mood_data),
+                'overall_sentiment': overall,
+                'trend_analysis': trend,
+                'most_common_mood': most_common_mood_ar,
+                'moods_distribution': dict(mood_counts),
+                'prediction': prediction,
+                'sentiment_analysis': []  # يمكن إضافة تحليلات النصوص إذا وجدت
+            },
             'language': language
         })
         
