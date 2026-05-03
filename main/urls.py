@@ -22,7 +22,7 @@ from main.views import (
     send_morning_tip, send_notifications_to_all_users,
     cron_daily_summary, cron_morning_tip, cron_smart_notifications,
     cron_test_simple,
-    get_weather, search_food,analyze_sentiment,
+    get_weather, search_food, analyze_sentiment,
     comprehensive_health_analytics_view,
     get_comprehensive_analytics_api,
     get_analytics_summary,
@@ -31,15 +31,16 @@ from main.views import (
     export_analytics_report,
     compare_with_peers,
     get_smart_recommendations,
-    search_medication, get_medication_details, get_user_medications,habit_medication_analytics_api,
-    habit_recommendations_api,habit_predictions_api,
+    search_medication, get_medication_details, get_user_medications,
+    habit_medication_analytics_api, habit_recommendations_api, habit_predictions_api,
     add_user_medication, delete_user_medication,
     get_user_achievements, test_websocket, smart_insights,
-    analyze_sentiment_text,
-    analyze_sentiment_batch,analyze_with_context_api,get_mood_insights_api, quick_sentiment_api,
-    health_dashboard, analyze_chat_message,public_analyze_sentiment,get_user_medical_records,get_medical_record_detail,
-    get_health_analysis_api,delete_medical_record,
-    refresh_analysis,get_user_chronic_conditions,test_medical_api,
+    analyze_sentiment_text, analyze_sentiment_batch, analyze_with_context_api,
+    get_mood_insights_api, quick_sentiment_api,
+    health_dashboard, analyze_chat_message, public_analyze_sentiment,
+    get_user_medical_records, get_medical_record_detail, delete_medical_record,
+    get_health_analysis_api, refresh_analysis, get_user_chronic_conditions,
+    test_medical_api, MedicalRecordViewSet,
     # ✅ دوال ESP32
     esp32_update_health_status,
     esp32_get_latest_health_status,
@@ -75,31 +76,25 @@ esp32_urls = [
     path('esp32/latest/', esp32_get_latest_health_status, name='esp32-latest'),
     path('esp32/history/', esp32_get_health_history, name='esp32-history'),
 ]
-# ✅ مسارات التحليلات الصحية الذكية (NEW)
+
+# =========================================================
+# ✅ مسارات التحليلات الصحية الذكية
 # =========================================================
 health_analytics_urls = [
-    # 📊 لوحة التحكم الصحية الرئيسية
     path('health/dashboard/', health_dashboard, name='health_dashboard'),
-    
-    # 🤖 API التحليلات الصحية (AJAX)
     path('health/analysis/api/', get_health_analysis_api, name='health_analysis_api'),
-    
-    # 🔄 تحديث التحليلات يدوياً
     path('health/analysis/refresh/', refresh_analysis, name='health_analysis_refresh'),
-  
 ]
+
 # =========================================================
 # ✅ المسارات الأساسية
 # =========================================================
 base_urls = [
-   
-    
     # 🌤️ الطقس
     path('weather/', get_weather, name='weather'),
     
     # 🥗 التغذية والبحث عن الطعام
     path('food/search/', search_food, name='food-search'),
-    
     
     # 😊 تحليل المشاعر
     path('sentiment/analyze/', analyze_sentiment, name='sentiment-analyze'),
@@ -120,7 +115,6 @@ base_urls = [
     path('medications/user/', get_user_medications, name='user-medications'),
     path('medications/user/add/', add_user_medication, name='add-user-medication'),
     path('medications/user/<int:user_med_id>/delete/', delete_user_medication, name='delete-user-medication'),
-
 
     # 📱 Push Notifications
     path('push-subscribe/', push_subscribe, name='push-subscribe'),
@@ -160,40 +154,36 @@ base_urls = [
     path('test-simple/', lambda request: JsonResponse({'status': 'ok', 'message': 'Test endpoint works!'}), name='test-simple'),
     path('test-websocket/', test_websocket, name='test-websocket'),
 ]
+
+# =========================================================
+# ✅ مسارات المهام المجدولة (Cron)
+# =========================================================
 cron_urls = [
     path('cron/daily-summary/', cron_daily_summary, name='cron-daily-summary'),
     path('cron/morning-tip/', cron_morning_tip, name='cron-morning-tip'),
     path('cron/smart-notifications/', cron_smart_notifications, name='cron-smart-notifications'),
     path('cron/test/', cron_test_simple, name='cron-test'),
 ]
+
+# =========================================================
+# ✅ مسارات تحليلات العادات
+# =========================================================
 habit_analytics_urls = [
     path('habits/analytics/', habit_medication_analytics_api, name='habit_analytics'),
     path('habits/recommendations/', habit_recommendations_api, name='habit_recommendations'),
     path('habits/predictions/', habit_predictions_api, name='habit_predictions'),
 ]
+
 # =========================================================
 # ✅ مسارات التحليلات الشاملة (Comprehensive Analytics)
 # =========================================================
 comprehensive_analytics_urls = [
-    # 📊 الصفحة الرئيسية للتحليلات الشاملة
     path('analytics/comprehensive/', comprehensive_health_analytics_view, name='comprehensive_analytics'),
-    
-    # 🤖 API التحليلات الشاملة
     path('analytics/comprehensive/api/', get_comprehensive_analytics_api, name='comprehensive_analytics_api'),
-    
-    # 📋 ملخص سريع
     path('analytics/summary/', get_analytics_summary, name='analytics_summary'),
-    
-    # 💡 التوصيات فقط
     path('analytics/recommendations/', get_recommendations_only, name='analytics_recommendations'),
-    
-    # 🔄 تحديث التحليلات
     path('analytics/refresh/', refresh_comprehensive_analytics, name='analytics_refresh'),
-    
-    # 📥 تصدير التقرير
     path('analytics/export/', export_analytics_report, name='analytics_export'),
-    
-    # 📊 مقارنة مع الأقران
     path('analytics/compare/', compare_with_peers, name='analytics_compare'),
 ]
 
@@ -201,36 +191,33 @@ comprehensive_analytics_urls = [
 # ✅ مسارات تحليل المشاعر (Sentiment Analysis)
 # =========================================================
 sentiment_urls = [
-    # تحليل نص واحد
     path('sentiment/analyze/', analyze_sentiment_text, name='sentiment_analyze'),
-    
-    # تحليل مجموعة نصوص
     path('sentiment/batch/', analyze_sentiment_batch, name='sentiment_batch'),
-    
-    # تحليل مع سياق (متقدم)
     path('sentiment/context/', analyze_with_context_api, name='sentiment_context'),
-    
-    # رؤى من سجلات المزاج
     path('sentiment/mood-insights/', get_mood_insights_api, name='sentiment_mood_insights'),
-    
-    # تحليل سريع (GET)
     path('sentiment/quick/', quick_sentiment_api, name='sentiment_quick'),
-    
-    # تحليل رسائل الدردشة
     path('sentiment/chat/', analyze_chat_message, name='sentiment_chat'),
-    
-    # تحليل عام بدون مصادقة
     path('sentiment/public/', public_analyze_sentiment, name='sentiment_public'),
 ]
+
+# =========================================================
+# ✅ مسارات السجلات الطبية والأمراض المزمنة
+# =========================================================
 medical_urls = [
     # 📄 السجلات الطبية
     path('medical-records/', get_user_medical_records, name='medical_records_list'),
     path('medical-records/<int:record_id>/', get_medical_record_detail, name='medical_record_detail'),
     path('medical-records/<int:record_id>/delete/', delete_medical_record, name='medical_record_delete'),
+    path('medical-records/save-with-conditions/', MedicalRecordViewSet.as_view({'post': 'save_with_conditions'}), name='save_with_conditions'),
+    path('medical-records/save-with-file/', MedicalRecordViewSet.as_view({'post': 'save_with_file'}), name='save_with_file'),
+    
+    # 🧪 اختبار API السجلات الطبية
     path('medical/test/', test_medical_api, name='test_medical'),
+    
     # 🩺 الأمراض المزمنة
     path('user/conditions/', get_user_chronic_conditions, name='user_conditions'),
 ]
+
 # =========================================================
 # ✅ دمج جميع المسارات (بدون مسارات مكررة)
 # =========================================================
