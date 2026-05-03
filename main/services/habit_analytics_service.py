@@ -57,9 +57,6 @@ class HabitMedicationAnalyticsService:
     
     def _is_medication(self, habit):
         """✅ دالة مساعدة لتحديد إذا كانت العادة دواء أم لا"""
-        # التحقق من localStorage عبر الـ type (يتم تعيينه في الواجهة)
-        # ولكن في الخلفية، نعتمد على الكلمات المفتاحية والأيقونات
-        
         text = (habit.name + ' ' + (habit.description or '')).lower()
         
         # كلمات مفتاحية للأدوية
@@ -151,8 +148,13 @@ class HabitMedicationAnalyticsService:
         total_medications = len(medications) + active_medications_db.count()
         
         total_habits = len(habits)
-        completed_today = habit_logs.filter(log_date=self.today_date, is_completed=True).count()
-        completion_rate = round((completed_today / total_habits) * 100) if total_habits > 0 else 0
+        
+        # ✅ تصحيح: حساب الإنجاز اليومي بشكل صحيح (نسبة مئوية)
+        today_logs = habit_logs.filter(log_date=self.today_date)
+        completed_today_count = today_logs.filter(is_completed=True).count()
+        
+        # ✅ النسبة المئوية محسوبة من إجمالي العادات (وليس الأدوية)
+        completion_rate = round((completed_today_count / total_habits) * 100) if total_habits > 0 else 0
         
         # ✅ حساب الالتزام بالأدوية (من سجلات الأدوية فقط)
         med_adherence = 0
@@ -162,6 +164,8 @@ class HabitMedicationAnalyticsService:
             if med_total > 0:
                 med_completed = med_logs.filter(is_completed=True).count()
                 med_adherence = round((med_completed / med_total) * 100)
+            else:
+                med_adherence = 0  # لا توجد سجلات أدوية
         
         # ✅ أقوى عادة وأضعف عادة (من العادات فقط، وليس الأدوية)
         habit_completion = {}
@@ -175,31 +179,10 @@ class HabitMedicationAnalyticsService:
         best_habit = max(habit_completion, key=habit_completion.get) if habit_completion else None
         worst_habit = min(habit_completion, key=habit_completion.get) if habit_completion else None
         
-        return {
-            'total_habits': total_habits,
-            'total_medications': total_medications,  # ✅ اسم واضح
-            'active_medications': total_medications,
-            'completed_today': completed_today,
-            'completion_rate': completion_rate,
-            'medication_adherence': med_adherence,
-            'best_habit': best_habit,
-            'worst_habit': worst_habit,
-            'habit_completion_rates': habit_completion,
-            'streak': self._calculate_current_streak(habit_logs),
-            'analysis_days': self.analysis_days
-        }
-    
-    def _calculate_current_streak(self, habit_logs):
-        """حساب السلسلة الحالية (Streak) - بناءً على العادات فقط"""
-        if not habit_logs.exists():
-            return 0
-        
-        # ✅ استخدام العادات فقط في حساب السلسلة
-        habit_data = self._get_habits_data()
-        habit_ids = [h.id for h in habit_data['habits']]
-        
+        # ✅ حساب السلسلة (Streak) - فقط للعادات، وليس الأدوية
         streak = 0
         current_date = self.today_date
+        habit_ids = [h.id for h in habits]
         
         for _ in range(self.analysis_days):
             day_logs = habit_logs.filter(log_date=current_date, habit_id__in=habit_ids)
@@ -209,16 +192,33 @@ class HabitMedicationAnalyticsService:
             else:
                 break
         
-        return streak
+        return {
+            'total_habits': total_habits,
+            'total_medications': total_medications,
+            'active_medications': total_medications,
+            'completed_today': completed_today_count,
+            'completion_rate': completion_rate,
+            'medication_adherence': med_adherence,
+            'best_habit': best_habit,
+            'worst_habit': worst_habit,
+            'habit_completion_rates': habit_completion,
+            'streak': streak,
+            'analysis_days': self.analysis_days
+        }
     
     def get_correlations(self):
-        """تحليل العلاقات بين العادات وعوامل أخرى (بيانات محدودة)"""
+        """تحليل العلاقات بين العادات وعوامل أخرى - فقط إذا كان هناك بيانات كافية"""
         
         correlations = []
         habit_data = self._get_habits_data()
         df = habit_data['df']
         
-        if len(df) < 3:
+        # ✅ تحتاج على الأقل 5 أيام من البيانات لتحليل ذي معنى
+        if len(df) < 5:
+            return correlations
+        
+        # ✅ تحتاج إلى عادات نشطة على الأقل
+        if len(habit_data['habits']) < 2:
             return correlations
         
         # بيانات النوم (آخر 10 أيام)
@@ -233,35 +233,48 @@ class HabitMedicationAnalyticsService:
             entry_time__gte=self.analysis_start
         )
         
-        if sleep_data.exists() and len(df) > 0:
+        # ✅ التحقق من وجود بيانات كافية للنوم
+        if sleep_data.exists() and len(df) >= 5:
             avg_sleep = sleep_data.aggregate(Avg('duration_hours'))['duration_hours__avg'] or 0
-            completion_rate = df['completion_rate'].mean() * 100
-            
-            if completion_rate > 70 and avg_sleep >= 7:
-                correlations.append({
-                    'icon': '😴',
-                    'title': self._t('العادات وجودة النوم', 'Habits & Sleep Quality'),
-                    'description': self._t(
-                        f'التزامك العالي ({completion_rate:.0f}%) مرتبط بنوم أفضل',
-                        f'Your high adherence ({completion_rate:.0f}%) is linked to better sleep'
-                    ),
-                    'strength': min(0.9, completion_rate / 100),
-                    'sample_size': len(df)
-                })
+            completion_rates = df['completion_rate'].dropna()
+            if len(completion_rates) > 0:
+                completion_rate = completion_rates.mean() * 100
+                
+                if completion_rate > 50 and avg_sleep >= 7:
+                    correlations.append({
+                        'icon': '😴',
+                        'title': self._t('العادات وجودة النوم', 'Habits & Sleep Quality'),
+                        'description': self._t(
+                            f'التزامك بالعادات ({completion_rate:.0f}%) مرتبط بنوم {avg_sleep:.0f} ساعات',
+                            f'Your habit adherence ({completion_rate:.0f}%) is linked to {avg_sleep:.0f} hours of sleep'
+                        ),
+                        'strength': min(0.7, completion_rate / 100),
+                        'sample_size': len(df)
+                    })
         
-        if mood_data.exists() and len(df) > 0:
-            good_mood_days = mood_data.filter(mood__in=['Excellent', 'Good']).count()
-            if good_mood_days > 1:
-                correlations.append({
-                    'icon': '😊',
-                    'title': self._t('العادات والمزاج', 'Habits & Mood'),
-                    'description': self._t(
-                        'الأيام التي تلتزم فيها بعاداتك يكون مزاجك أفضل',
-                        'Days you stick to your habits, your mood is better'
-                    ),
-                    'strength': 0.65,
-                    'sample_size': mood_data.count()
-                })
+        # ✅ التحقق من وجود بيانات كافية للمزاج
+        if mood_data.exists() and len(df) >= 5:
+            good_mood_count = mood_data.filter(mood__in=['Excellent', 'Good']).count()
+            total_moods = mood_data.count()
+            
+            if total_moods >= 3:
+                good_mood_rate = (good_mood_count / total_moods) * 100
+                completion_rates = df['completion_rate'].dropna()
+                
+                if len(completion_rates) > 0:
+                    completion_rate = completion_rates.mean() * 100
+                    
+                    if completion_rate > 40 and good_mood_rate > 50:
+                        correlations.append({
+                            'icon': '😊',
+                            'title': self._t('العادات والمزاج', 'Habits & Mood'),
+                            'description': self._t(
+                                'الأيام التي تلتزم فيها بعاداتك غالباً ما يكون مزاجك أفضل',
+                                'Days you stick to your habits, your mood tends to be better'
+                            ),
+                            'strength': min(0.6, (completion_rate / 100) * (good_mood_rate / 100)),
+                            'sample_size': min(len(df), total_moods)
+                        })
         
         return correlations
     
@@ -272,59 +285,95 @@ class HabitMedicationAnalyticsService:
             summary = self.get_summary()
         
         recommendations = []
-        habit_data = self._get_habits_data()
         
-        if summary['completion_rate'] < 60 and summary['total_habits'] > 0:
+        # ✅ توصية لتحسين الإنجاز اليومي
+        if summary['completion_rate'] < 70 and summary['completion_rate'] > 0:
             recommendations.append({
                 'priority': 'high',
                 'icon': '📋',
                 'category': 'habits',
-                'title': self._t('تحسين الالتزام بالعادات', 'Improve Habit Adherence'),
+                'title': self._t('حافظ على إنجاز عاداتك اليومية', 'Keep Up With Your Daily Habits'),
                 'description': self._t(
-                    f'التزامك الحالي {summary["completion_rate"]}%',
-                    f'Your current adherence is {summary["completion_rate"]}%'
+                    f'أنجزت {summary["completed_today"]} من أصل {summary["total_habits"]} عادة اليوم ({summary["completion_rate"]}%)',
+                    f'You completed {summary["completed_today"]} out of {summary["total_habits"]} habits today ({summary["completion_rate"]}%)'
                 ),
                 'actions': [
-                    self._t('حدد عادة واحدة صغيرة والتزم بها', 'Pick one small habit and stick to it'),
+                    self._t('حدد وقتاً محدداً لكل عادة', 'Set a specific time for each habit'),
                     self._t('استخدم التذكيرات', 'Use reminders'),
-                    self._t('سجل إنجازاتك فوراً', 'Log your achievements immediately')
+                    self._t('ابدأ بعادة صغيرة واحدة فقط', 'Start with just one small habit')
                 ],
                 'quick_tip': self._t('الاستمرارية أهم من الكمية', 'Consistency is more important than quantity')
             })
         
-        # ✅ توصية للأدوية فقط إذا كان هناك أدوية والتزام منخفض
-        if summary['total_medications'] > 0 and summary['medication_adherence'] < 80:
-            recommendations.append({
-                'priority': 'high',
-                'icon': '💊',
-                'category': 'medication',
-                'title': self._t('تحسين الالتزام بالأدوية', 'Improve Medication Adherence'),
-                'description': self._t(
-                    f'لديك {summary["total_medications"]} دواء، التزامك الحالي {summary["medication_adherence"]}%',
-                    f'You have {summary["total_medications"]} medications, adherence is {summary["medication_adherence"]}%'
-                ),
-                'actions': [
-                    self._t('تناول الدواء في نفس الوقت يومياً', 'Take medication at the same time daily'),
-                    self._t('سجل الجرعة فور تناولها', 'Log the dose immediately after taking')
-                ],
-                'quick_tip': self._t('التنظيم يساعد على الالتزام', 'Organization helps with adherence')
-            })
+        # ✅ توصية للأدوية
+        if summary['total_medications'] > 0:
+            if summary['medication_adherence'] < 70:
+                recommendations.append({
+                    'priority': 'high',
+                    'icon': '💊',
+                    'category': 'medication',
+                    'title': self._t('تتبع أدويتك بانتظام', 'Track Your Medications Regularly'),
+                    'description': self._t(
+                        f'لديك {summary["total_medications"]} دواء، نسبة التزامك {summary["medication_adherence"]}%',
+                        f'You have {summary["total_medications"]} medications, adherence is {summary["medication_adherence"]}%'
+                    ),
+                    'actions': [
+                        self._t('سجل الجرعة فور تناولها', 'Log the dose immediately after taking'),
+                        self._t('اضبط منبهاً لتذكيرك', 'Set an alarm to remind you'),
+                        self._t('ضع الأدوية في مكان مرئي', 'Place medications in a visible spot')
+                    ],
+                    'quick_tip': self._t('تناول الأدوية في نفس الوقت يومياً', 'Take medications at the same time daily')
+                })
+            elif summary['medication_adherence'] >= 70 and summary['medication_adherence'] < 100:
+                recommendations.append({
+                    'priority': 'medium',
+                    'icon': '💊',
+                    'category': 'medication',
+                    'title': self._t('أداء جيد في الأدوية', 'Good Medication Performance'),
+                    'description': self._t(
+                        f'التزامك بالأدوية {summary["medication_adherence"]}%، استمر',
+                        f'Your medication adherence is {summary["medication_adherence"]}%, keep it up'
+                    ),
+                    'actions': [
+                        self._t('استمر على هذا المستوى', 'Maintain this level'),
+                        self._t('لا تنسَ تسجيل الجرعات', "Don't forget to log your doses")
+                    ],
+                    'quick_tip': self._t('الانتظام يحسن فعالية العلاج', 'Regularity improves treatment effectiveness')
+                })
         
-        if summary['streak'] > 0 and summary['streak'] < 3:
+        # ✅ توصية للسلسلة (Streak)
+        if summary['streak'] > 0 and summary['streak'] < 5:
+            if summary['streak'] == 1:
+                recommendations.append({
+                    'priority': 'medium',
+                    'icon': '🔥',
+                    'category': 'habits',
+                    'title': self._t('بداية جيدة! حافظ على استمراريتك', 'Good Start! Keep Your Streak Going'),
+                    'description': self._t(
+                        f'لديك سلسلة حالية من {summary["streak"]} يوم، حاول الوصول إلى 7 أيام',
+                        f'Your current streak is {summary["streak"]} day, try to reach 7 days'
+                    ),
+                    'actions': [
+                        self._t('لا تفوت يوماً واحداً', "Don't miss a single day"),
+                        self._t('احتفل عند تحقيق 7 أيام', 'Celebrate when you reach 7 days')
+                    ],
+                    'quick_tip': self._t('كل يوم مهم في رحلتك', 'Every day matters in your journey')
+                })
+        elif summary['streak'] >= 5:
             recommendations.append({
-                'priority': 'medium',
-                'icon': '🔥',
+                'priority': 'low',
+                'icon': '🏆',
                 'category': 'habits',
-                'title': self._t('حافظ على استمراريتك', 'Maintain Your Streak'),
+                'title': self._t('سلسلة رائعة! استمر', 'Great Streak! Keep Going'),
                 'description': self._t(
-                    f'لديك سلسلة حالية من {summary["streak"]} يوم',
-                    f'Your current streak is {summary["streak"]} days'
+                    f'لديك سلسلة مستمرة لمدة {summary["streak"]} يوم',
+                    f'You have a {summary["streak"]}-day streak'
                 ),
                 'actions': [
-                    self._t('لا تفوت يوماً واحداً', "Don't miss a single day"),
-                    self._t('احتفل عند تحقيق 7 أيام', 'Celebrate when you reach 7 days')
+                    self._t('استمر في تحقيق أهدافك اليومية', 'Keep achieving your daily goals'),
+                    self._t('شارك إنجازك مع الأصدقاء', 'Share your achievement with friends')
                 ],
-                'quick_tip': self._t('كل يوم مهم في رحلتك', 'Every day matters in your journey')
+                'quick_tip': self._t('الاستمرارية تصنع العادات', 'Consistency builds habits')
             })
         
         return recommendations
@@ -332,33 +381,54 @@ class HabitMedicationAnalyticsService:
     def get_predictions(self, summary=None):
         """توليد توقعات بسيطة (بدون ML معقد)"""
         
+        if summary is None:
+            summary = self.get_summary()
+        
         predictions = []
         
-        if summary and summary['streak'] > 0:
-            predicted_streak = min(7, summary['streak'] + 2)
+        # ✅ توقع السلسلة
+        if summary['streak'] > 0:
+            predicted_streak = min(7, summary['streak'] + 2) if summary['streak'] < 7 else summary['streak']
             predictions.append({
                 'icon': '🔥',
                 'category': 'streak',
-                'label': self._t('السلسلة المتوقعة', 'Expected streak'),
+                'label': self._t('السلسلة المتوقعة خلال أسبوع', 'Expected streak in 1 week'),
                 'value': f"{predicted_streak} {self._t('أيام', 'days')}",
-                'trend': 'up',
+                'trend': 'up' if predicted_streak > summary['streak'] else 'stable',
                 'trend_text': self._t('استمر هكذا', 'Keep it up'),
                 'note': self._t('مع الالتزام اليومي', 'With daily commitment'),
                 'confidence': 70
             })
         
-        if summary and summary['completion_rate'] > 0:
-            future_rate = min(90, summary['completion_rate'] + 10)
+        # ✅ توقع تحسين الإنجاز
+        if summary['completion_rate'] < 100:
+            improvement = min(30, 100 - summary['completion_rate'])
+            future_rate = min(100, summary['completion_rate'] + improvement)
             predictions.append({
                 'icon': '📈',
                 'category': 'adherence',
-                'label': self._t('معدل الالتزام المتوقع', 'Expected adherence'),
+                'label': self._t('معدل الإنجاز المتوقع', 'Expected completion rate'),
                 'value': f"{future_rate}%",
                 'trend': 'up' if future_rate > summary['completion_rate'] else 'stable',
-                'trend_text': self._t('تحسن متوقع', 'Expected improvement'),
-                'note': self._t('مع الاستمرارية', 'With consistency'),
+                'trend_text': self._t('تحسن متوقع مع الاستمرار', 'Expected improvement with consistency'),
+                'note': self._t('حاول تحقيق جميع عاداتك اليومية', 'Try to complete all your daily habits'),
                 'confidence': 75
             })
+        
+        # ✅ توقع الالتزام بالأدوية (إذا كانت موجودة)
+        if summary['total_medications'] > 0:
+            if summary['medication_adherence'] < 100:
+                future_adherence = min(100, summary['medication_adherence'] + 15)
+                predictions.append({
+                    'icon': '💊',
+                    'category': 'medication',
+                    'label': self._t('الالتزام بالأدوية المتوقع', 'Expected medication adherence'),
+                    'value': f"{future_adherence}%",
+                    'trend': 'up' if future_adherence > summary['medication_adherence'] else 'stable',
+                    'trend_text': self._t('تحسن مع التذكير', 'Improvement with reminders'),
+                    'note': self._t('سجل أدويتك يومياً', 'Log your medications daily'),
+                    'confidence': 80
+                })
         
         return predictions
     
